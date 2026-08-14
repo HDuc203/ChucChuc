@@ -22,28 +22,32 @@ import { COLORS } from '../constants/colors';
 import { Category, Product } from '../types';
 import { formatVND } from '../utils/format';
 import Toast from '../components/Toast';
+import ConfirmModal from '../components/ConfirmModal';
 import { useToast } from '../hooks/useToast';
 
 type ManageTab = 'products' | 'categories' | 'bank';
-
-const showConfirmDialog = (title: string, message: string, onConfirm: () => void) => {
-  if (Platform.OS === 'web') {
-    if (window.confirm(`${title}\n\n${message}`)) {
-      onConfirm();
-    }
-  } else {
-    Alert.alert(title, message, [
-      { text: 'Bỏ qua', style: 'cancel' },
-      { text: 'Xóa', style: 'destructive', onPress: onConfirm },
-    ]);
-  }
-};
 
 export default function ManageScreen() {
   const router = useRouter();
   const { toast, hide, success: toastSuccess } = useToast();
   const [activeTab, setActiveTab] = useState<ManageTab>('products');
   const [loading, setLoading] = useState(true);
+
+  // Custom Confirm Modal State
+  const [confirmConfig, setConfirmConfig] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    confirmType?: 'danger' | 'primary' | 'warning';
+    onConfirm: () => void;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
 
   // Data
   const [categories, setCategories] = useState<Category[]>([]);
@@ -313,17 +317,22 @@ export default function ManageScreen() {
       // Continue to prompt if check fails
     }
 
-    showConfirmDialog(
-      'Xóa món',
-      `Bạn có chắc muốn xóa "${product.name}" khỏi thực đơn?\n(Lịch sử bán hàng và báo cáo cũ vẫn được giữ nguyên)`,
-      async () => {
+    setConfirmConfig({
+      visible: true,
+      title: 'Xóa món khỏi thực đơn',
+      message: `Bạn có chắc muốn xóa "${product.name}" khỏi thực đơn?\n\n(Lịch sử bán hàng và báo cáo cũ vẫn được giữ nguyên)`,
+      confirmText: 'Xóa khỏi thực đơn',
+      cancelText: 'Bỏ qua',
+      confirmType: 'danger',
+      onConfirm: async () => {
+        setConfirmConfig((prev) => ({ ...prev, visible: false }));
         await supabase
           .from('products')
           .update({ is_deleted: true })
           .eq('id', product.id);
         fetchData();
-      }
-    );
+      },
+    });
   };
 
   // ── CATEGORY CRUD HANDLERS ─────────────────────────────────────────────────
@@ -388,17 +397,22 @@ export default function ManageScreen() {
       return;
     }
 
-    showConfirmDialog(
-      'Xóa danh mục',
-      `Bạn có chắc chắn muốn xóa danh mục "${cat.name}"?`,
-      async () => {
+    setConfirmConfig({
+      visible: true,
+      title: 'Xóa danh mục',
+      message: `Bạn có chắc chắn muốn xóa danh mục "${cat.name}"?`,
+      confirmText: 'Xóa danh mục',
+      cancelText: 'Bỏ qua',
+      confirmType: 'danger',
+      onConfirm: async () => {
+        setConfirmConfig((prev) => ({ ...prev, visible: false }));
         await supabase
           .from('categories')
           .update({ is_deleted: true })
           .eq('id', cat.id);
         fetchData();
-      }
-    );
+      },
+    });
   };
 
   // ── SAVE BANK SETTINGS (VIETQR) ────────────────────────────────────────────
@@ -808,6 +822,17 @@ export default function ManageScreen() {
           </View>
         </View>
       </Modal>
+      <ConfirmModal
+        visible={confirmConfig.visible}
+        title={confirmConfig.title}
+        message={confirmConfig.message}
+        confirmText={confirmConfig.confirmText}
+        cancelText={confirmConfig.cancelText}
+        confirmType={confirmConfig.confirmType}
+        onConfirm={confirmConfig.onConfirm}
+        onCancel={() => setConfirmConfig((prev) => ({ ...prev, visible: false }))}
+      />
+
       <Toast {...toast} onHide={hide} />
     </SafeAreaView>
   );

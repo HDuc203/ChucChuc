@@ -19,24 +19,12 @@ import { COLORS } from '../constants/colors';
 import { Order, OrderItem, Product, Table } from '../types';
 import { formatVND } from '../utils/format';
 import Toast from '../components/Toast';
+import ConfirmModal from '../components/ConfirmModal';
 import { useToast } from '../hooks/useToast';
 
 interface ExtendedOrder extends Order {
   tables?: Table;
 }
-
-const showConfirmDialog = (title: string, message: string, onConfirm: () => void) => {
-  if (Platform.OS === 'web') {
-    if (window.confirm(`${title}\n\n${message}`)) {
-      onConfirm();
-    }
-  } else {
-    Alert.alert(title, message, [
-      { text: 'Bỏ qua', style: 'cancel' },
-      { text: 'Xác nhận', style: 'destructive', onPress: onConfirm },
-    ]);
-  }
-};
 
 export default function OrdersHistoryScreen() {
   const router = useRouter();
@@ -56,6 +44,22 @@ export default function OrdersHistoryScreen() {
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [cancellingOrder, setCancellingOrder] = useState(false);
+
+  // Custom Confirm Modal State
+  const [confirmConfig, setConfirmConfig] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    confirmType?: 'danger' | 'primary' | 'warning';
+    onConfirm: () => void;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
 
   const formattedDateStr = selectedDate.toISOString().split('T')[0];
 
@@ -170,20 +174,34 @@ export default function OrdersHistoryScreen() {
 
     if (order.status === 'paid') {
       // ⚠️ 2-Step Confirmation for Paid Order Cancellation
-      showConfirmDialog(
-        '⚠️ Cảnh báo hủy đơn đã thanh toán',
-        `Đơn hàng #${order.id.substring(0, 6).toUpperCase()} (${formatVND(
+      setConfirmConfig({
+        visible: true,
+        title: '⚠️ Cảnh báo hủy đơn đã thanh toán',
+        message: `Đơn hàng #${order.id.substring(0, 6).toUpperCase()} (${formatVND(
           order.total_amount
         )}) đã thu tiền.\n\nHủy đơn sẽ làm GIẢM doanh thu của ngày này. Bạn có chắc chắn muốn hủy đơn không?`,
-        () => executeCancelOrder(order)
-      );
+        confirmText: 'Xác nhận hủy đơn',
+        cancelText: 'Bỏ qua',
+        confirmType: 'danger',
+        onConfirm: () => {
+          setConfirmConfig((prev) => ({ ...prev, visible: false }));
+          executeCancelOrder(order);
+        },
+      });
     } else {
       // Open Order Cancellation
-      showConfirmDialog(
-        'Xác nhận hủy đơn',
-        `Bạn có chắc muốn hủy đơn #${order.id.substring(0, 6).toUpperCase()}?`,
-        () => executeCancelOrder(order)
-      );
+      setConfirmConfig({
+        visible: true,
+        title: 'Xác nhận hủy đơn',
+        message: `Bạn có chắc chắn muốn hủy đơn hàng #${order.id.substring(0, 6).toUpperCase()}?`,
+        confirmText: 'Hủy đơn hàng',
+        cancelText: 'Bỏ qua',
+        confirmType: 'danger',
+        onConfirm: () => {
+          setConfirmConfig((prev) => ({ ...prev, visible: false }));
+          executeCancelOrder(order);
+        },
+      });
     }
   };
 
@@ -219,11 +237,18 @@ export default function OrdersHistoryScreen() {
   // Restore Order Logic (from 'cancelled' back to 'paid' or 'open')
   const handleRestoreOrderPrompt = (order: ExtendedOrder) => {
     const targetStatusText = order.paid_at ? 'Đã thanh toán' : 'Chưa thanh toán';
-    showConfirmDialog(
-      '🔄 Khôi phục đơn hàng',
-      `Khôi phục đơn hàng #${order.id.substring(0, 6).toUpperCase()} về trạng thái "${targetStatusText}"?\n\n(Doanh thu sẽ được cộng lại vào báo cáo)`,
-      () => executeRestoreOrder(order)
-    );
+    setConfirmConfig({
+      visible: true,
+      title: '🔄 Khôi phục đơn hàng',
+      message: `Khôi phục đơn hàng #${order.id.substring(0, 6).toUpperCase()} về trạng thái "${targetStatusText}"?\n\n(Doanh thu sẽ được cộng lại vào báo cáo)`,
+      confirmText: 'Khôi phục ngay',
+      cancelText: 'Bỏ qua',
+      confirmType: 'primary',
+      onConfirm: () => {
+        setConfirmConfig((prev) => ({ ...prev, visible: false }));
+        executeRestoreOrder(order);
+      },
+    });
   };
 
   const executeRestoreOrder = async (order: ExtendedOrder) => {
@@ -639,6 +664,17 @@ export default function OrdersHistoryScreen() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      <ConfirmModal
+        visible={confirmConfig.visible}
+        title={confirmConfig.title}
+        message={confirmConfig.message}
+        confirmText={confirmConfig.confirmText}
+        cancelText={confirmConfig.cancelText}
+        confirmType={confirmConfig.confirmType}
+        onConfirm={confirmConfig.onConfirm}
+        onCancel={() => setConfirmConfig((prev) => ({ ...prev, visible: false }))}
+      />
 
       <Toast {...toast} onHide={hide} />
     </SafeAreaView>

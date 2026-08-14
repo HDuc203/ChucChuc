@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,6 +17,19 @@ import { useCartStore } from '../stores/cartStore';
 import { COLORS } from '../constants/colors';
 import { CartItem, Order, Product, Table } from '../types';
 import { formatVND } from '../utils/format';
+
+const showConfirmDialog = (title: string, message: string, onConfirm: () => void) => {
+  if (Platform.OS === 'web') {
+    if (window.confirm(`${title}\n\n${message}`)) {
+      onConfirm();
+    }
+  } else {
+    Alert.alert(title, message, [
+      { text: 'Không', style: 'cancel' },
+      { text: 'Xác nhận', style: 'destructive', onPress: onConfirm },
+    ]);
+  }
+};
 
 export default function TableSelectScreen() {
   const router = useRouter();
@@ -248,40 +262,33 @@ export default function TableSelectScreen() {
   // Action 4: Cancel order at table
   const handleCancelOrder = () => {
     if (!selectedOccupiedTable || !occupiedOrder) return;
-    Alert.alert(
+    showConfirmDialog(
       'Xác nhận hủy đơn',
       `Bạn có chắc chắn muốn hủy toàn bộ đơn hàng tại ${selectedOccupiedTable.name}?`,
-      [
-        { text: 'Không', style: 'cancel' },
-        {
-          text: 'Hủy đơn & Giải phóng bàn',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setLoading(true);
-              // Update order status to cancelled
-              await supabase
-                .from('orders')
-                .update({ status: 'cancelled' })
-                .eq('id', occupiedOrder.id);
+      async () => {
+        try {
+          setLoading(true);
+          // Update order status to cancelled
+          await supabase
+            .from('orders')
+            .update({ status: 'cancelled' })
+            .eq('id', occupiedOrder.id);
 
-              // Reset table to empty
-              await supabase
-                .from('tables')
-                .update({ status: 'empty' })
-                .eq('id', selectedOccupiedTable.id);
+          // Reset table to empty
+          await supabase
+            .from('tables')
+            .update({ status: 'empty' })
+            .eq('id', selectedOccupiedTable.id);
 
-              setLoading(false);
-              setSelectedOccupiedTable(null);
-              Alert.alert('Thành công', `Đã hủy đơn và giải phóng ${selectedOccupiedTable.name}.`);
-              fetchTables();
-            } catch (err) {
-              setLoading(false);
-              Alert.alert('Lỗi', 'Không thể hủy đơn.');
-            }
-          },
-        },
-      ]
+          setLoading(false);
+          setSelectedOccupiedTable(null);
+          Alert.alert('Thành công', `Đã hủy đơn và giải phóng ${selectedOccupiedTable.name}.`);
+          fetchTables();
+        } catch (err) {
+          setLoading(false);
+          Alert.alert('Lỗi', 'Không thể hủy đơn.');
+        }
+      }
     );
   };
 

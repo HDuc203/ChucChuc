@@ -12,6 +12,7 @@ import {
   Modal,
   ScrollView,
   Image,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,6 +25,19 @@ import Toast from '../components/Toast';
 import { useToast } from '../hooks/useToast';
 
 type ManageTab = 'products' | 'categories' | 'bank';
+
+const showConfirmDialog = (title: string, message: string, onConfirm: () => void) => {
+  if (Platform.OS === 'web') {
+    if (window.confirm(`${title}\n\n${message}`)) {
+      onConfirm();
+    }
+  } else {
+    Alert.alert(title, message, [
+      { text: 'Bỏ qua', style: 'cancel' },
+      { text: 'Xóa', style: 'destructive', onPress: onConfirm },
+    ]);
+  }
+};
 
 export default function ManageScreen() {
   const router = useRouter();
@@ -299,23 +313,16 @@ export default function ManageScreen() {
       // Continue to prompt if check fails
     }
 
-    Alert.alert(
+    showConfirmDialog(
       'Xóa món',
       `Bạn có chắc muốn xóa "${product.name}" khỏi thực đơn?\n(Lịch sử bán hàng và báo cáo cũ vẫn được giữ nguyên)`,
-      [
-        { text: 'Bỏ qua', style: 'cancel' },
-        {
-          text: 'Xóa khỏi thực đơn',
-          style: 'destructive',
-          onPress: async () => {
-            await supabase
-              .from('products')
-              .update({ is_deleted: true })
-              .eq('id', product.id);
-            fetchData();
-          },
-        },
-      ]
+      async () => {
+        await supabase
+          .from('products')
+          .update({ is_deleted: true })
+          .eq('id', product.id);
+        fetchData();
+      }
     );
   };
 
@@ -381,23 +388,16 @@ export default function ManageScreen() {
       return;
     }
 
-    Alert.alert(
+    showConfirmDialog(
       'Xóa danh mục',
       `Bạn có chắc chắn muốn xóa danh mục "${cat.name}"?`,
-      [
-        { text: 'Bỏ qua', style: 'cancel' },
-        {
-          text: 'Xóa danh mục',
-          style: 'destructive',
-          onPress: async () => {
-            await supabase
-              .from('categories')
-              .update({ is_deleted: true })
-              .eq('id', cat.id);
-            fetchData();
-          },
-        },
-      ]
+      async () => {
+        await supabase
+          .from('categories')
+          .update({ is_deleted: true })
+          .eq('id', cat.id);
+        fetchData();
+      }
     );
   };
 

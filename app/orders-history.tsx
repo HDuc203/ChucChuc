@@ -10,6 +10,7 @@ import {
   Alert,
   ActivityIndicator,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -23,6 +24,19 @@ import { useToast } from '../hooks/useToast';
 interface ExtendedOrder extends Order {
   tables?: Table;
 }
+
+const showConfirmDialog = (title: string, message: string, onConfirm: () => void) => {
+  if (Platform.OS === 'web') {
+    if (window.confirm(`${title}\n\n${message}`)) {
+      onConfirm();
+    }
+  } else {
+    Alert.alert(title, message, [
+      { text: 'Bỏ qua', style: 'cancel' },
+      { text: 'Xác nhận', style: 'destructive', onPress: onConfirm },
+    ]);
+  }
+};
 
 export default function OrdersHistoryScreen() {
   const router = useRouter();
@@ -155,34 +169,20 @@ export default function OrdersHistoryScreen() {
     }
 
     if (order.status === 'paid') {
-      // ⚠️ 2-Step Alert for Paid Order Cancellation (Prevents accidental revenue reduction)
-      Alert.alert(
+      // ⚠️ 2-Step Confirmation for Paid Order Cancellation
+      showConfirmDialog(
         '⚠️ Cảnh báo hủy đơn đã thanh toán',
         `Đơn hàng #${order.id.substring(0, 6).toUpperCase()} (${formatVND(
           order.total_amount
         )}) đã thu tiền.\n\nHủy đơn sẽ làm GIẢM doanh thu của ngày này. Bạn có chắc chắn muốn hủy đơn không?`,
-        [
-          { text: 'Bỏ qua', style: 'cancel' },
-          {
-            text: 'Xác nhận hủy đơn',
-            style: 'destructive',
-            onPress: () => executeCancelOrder(order),
-          },
-        ]
+        () => executeCancelOrder(order)
       );
     } else {
       // Open Order Cancellation
-      Alert.alert(
+      showConfirmDialog(
         'Xác nhận hủy đơn',
         `Bạn có chắc muốn hủy đơn #${order.id.substring(0, 6).toUpperCase()}?`,
-        [
-          { text: 'Bỏ qua', style: 'cancel' },
-          {
-            text: 'Hủy đơn hàng',
-            style: 'destructive',
-            onPress: () => executeCancelOrder(order),
-          },
-        ]
+        () => executeCancelOrder(order)
       );
     }
   };
@@ -219,16 +219,10 @@ export default function OrdersHistoryScreen() {
   // Restore Order Logic (from 'cancelled' back to 'paid' or 'open')
   const handleRestoreOrderPrompt = (order: ExtendedOrder) => {
     const targetStatusText = order.paid_at ? 'Đã thanh toán' : 'Chưa thanh toán';
-    Alert.alert(
+    showConfirmDialog(
       '🔄 Khôi phục đơn hàng',
       `Khôi phục đơn hàng #${order.id.substring(0, 6).toUpperCase()} về trạng thái "${targetStatusText}"?\n\n(Doanh thu sẽ được cộng lại vào báo cáo)`,
-      [
-        { text: 'Bỏ qua', style: 'cancel' },
-        {
-          text: 'Khôi phục ngay',
-          onPress: () => executeRestoreOrder(order),
-        },
-      ]
+      () => executeRestoreOrder(order)
     );
   };
 

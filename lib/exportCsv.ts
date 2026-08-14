@@ -1,6 +1,6 @@
+import { Alert, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { Alert } from 'react-native';
 
 export interface OrderExportData {
   id: string;
@@ -42,22 +42,37 @@ export const exportRevenueToCsv = async (
     });
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const fileName = `BaoCao_ChúcChuc_${periodTitle}_${timestamp}.csv`;
-    const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+    const fileName = `BaoCao_ChucChuc_${periodTitle}_${timestamp}.csv`;
 
-    await FileSystem.writeAsStringAsync(fileUri, csvContent, {
-      encoding: FileSystem.EncodingType.UTF8,
-    });
-
-    const canShare = await Sharing.isAvailableAsync();
-    if (canShare) {
-      await Sharing.shareAsync(fileUri, {
-        mimeType: 'text/csv',
-        dialogTitle: `Xuất Báo Cáo Doanh Thu Chúc Chúc (${periodTitle})`,
-        UTI: 'public.comma-separated-values-text',
-      });
+    if (Platform.OS === 'web') {
+      // WEB DOWNLOAD IMPLEMENTATION (HTML5 Blob)
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', fileName);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
     } else {
-      Alert.alert('Đã tạo file báo cáo', `File đã lưu tại: ${fileUri}`);
+      // MOBILE NATIVE IMPLEMENTATION (iOS / Android)
+      const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+      await FileSystem.writeAsStringAsync(fileUri, csvContent, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'text/csv',
+          dialogTitle: `Xuất Báo Cáo Doanh Thu Chúc Chúc (${periodTitle})`,
+          UTI: 'public.comma-separated-values-text',
+        });
+      } else {
+        Alert.alert('Đã tạo file báo cáo', `File đã lưu tại: ${fileUri}`);
+      }
     }
   } catch (err: any) {
     console.error('Export CSV error:', err);

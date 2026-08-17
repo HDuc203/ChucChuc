@@ -7,15 +7,23 @@
 create or replace function revenue_by_year(target_year int)
 returns table(month int, revenue numeric, order_count bigint)
 language sql as $$
+  with merged_daily as (
+    select day, total_revenue, total_orders from daily_summaries
+    where extract(year from day) = target_year
+    union all
+    select date(paid_at) as day, sum(total_amount) as total_revenue, count(*) as total_orders
+    from orders
+    where status = 'paid' and paid_at is not null
+      and extract(year from paid_at) = target_year
+      and date(paid_at) not in (select day from daily_summaries)
+    group by date(paid_at)
+  )
   select 
-    extract(month from paid_at)::int as month,
-    sum(total_amount) as revenue,
-    count(*) as order_count
-  from orders
-  where status = 'paid'
-    and paid_at is not null
-    and extract(year from paid_at) = target_year
-  group by extract(month from paid_at)
+    extract(month from day)::int as month,
+    sum(total_revenue) as revenue,
+    sum(total_orders)::bigint as order_count
+  from merged_daily
+  group by extract(month from day)
   order by month;
 $$;
 
@@ -23,16 +31,25 @@ $$;
 create or replace function revenue_detail_by_month(target_year int, target_month int)
 returns table(day int, revenue numeric, order_count bigint)
 language sql as $$
+  with merged_daily as (
+    select day, total_revenue, total_orders from daily_summaries
+    where extract(year from day) = target_year
+      and extract(month from day) = target_month
+    union all
+    select date(paid_at) as day, sum(total_amount) as total_revenue, count(*) as total_orders
+    from orders
+    where status = 'paid' and paid_at is not null
+      and extract(year from paid_at) = target_year
+      and extract(month from paid_at) = target_month
+      and date(paid_at) not in (select day from daily_summaries)
+    group by date(paid_at)
+  )
   select 
-    extract(day from paid_at)::int as day,
-    sum(total_amount) as revenue,
-    count(*) as order_count
-  from orders
-  where status = 'paid'
-    and paid_at is not null
-    and extract(year from paid_at) = target_year
-    and extract(month from paid_at) = target_month
-  group by extract(day from paid_at)
+    extract(day from day)::int as day,
+    sum(total_revenue) as revenue,
+    sum(total_orders)::bigint as order_count
+  from merged_daily
+  group by extract(day from day)
   order by day;
 $$;
 

@@ -201,7 +201,7 @@ export default function MenuScreen() {
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <TouchableOpacity id="btn-back-menu" onPress={handleBack} style={styles.backTouch}>
-            <Text style={styles.backText}>←</Text>
+            <Text style={styles.backText}>← Quay lại</Text>
           </TouchableOpacity>
           <View style={styles.headerInfo}>
             <Text style={styles.shopName}>Chúc Chúc</Text>
@@ -455,18 +455,19 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   backTouch: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: 'rgba(197, 160, 89, 0.4)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    marginRight: 10,
   },
   backText: {
     fontFamily: 'Nunito_700Bold',
-    fontSize: 20,
+    fontSize: 13,
     color: '#234635',
   },
   headerInfo: { flex: 1 },

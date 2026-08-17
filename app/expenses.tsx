@@ -441,8 +441,22 @@ const styles = StyleSheet.create({
 
   header: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 14 },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  backBtn: { paddingVertical: 4 },
-  backText: { fontFamily: 'Nunito_700Bold', fontSize: 14, color: COLORS.primary },
+  backBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(197, 160, 89, 0.4)',
+  },
+  backText: {
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 13,
+    color: '#234635',
+  },
   btnAdd: {
     backgroundColor: COLORS.primary,
     paddingHorizontal: 14,

@@ -305,6 +305,67 @@ export default function OrdersHistoryScreen() {
     }
   };
 
+  // ── PERMANENT DELETE CANCELLED ORDER ─────────────────────────────
+  const handleDeletePermanentPrompt = (order: ExtendedOrder) => {
+    setConfirmConfig({
+      visible: true,
+      title: '🗑️ Xóa vĩnh viễn đơn hàng',
+      message: `Bạn có chắc chắn muốn XÓA VĨNH VIỄN đơn hàng #${order.id.substring(0, 6).toUpperCase()} không?\n\n⚠️ Đơn hàng sẽ bị xóa hoàn toàn khỏi cơ sở dữ liệu và không thể khôi phục.`,
+      confirmText: 'Xác nhận xóa vĩnh viễn',
+      cancelText: 'Hủy bỏ',
+      confirmType: 'danger',
+      onConfirm: () => {
+        setConfirmConfig((prev) => ({ ...prev, visible: false }));
+        executeDeletePermanent(order);
+      },
+    });
+  };
+
+  const executeDeletePermanent = async (order: ExtendedOrder) => {
+    try {
+      // 1. Delete order_items first
+      await supabase.from('order_items').delete().eq('order_id', order.id);
+
+      // 2. Delete orders row
+      const { error } = await supabase.from('orders').delete().eq('id', order.id);
+      if (error) throw error;
+
+      toastSuccess(`Đã xóa vĩnh viễn đơn #${order.id.substring(0, 6).toUpperCase()}`);
+      setSelectedOrder(null);
+      fetchOrdersForDate(selectedDate);
+    } catch (err: any) {
+      Alert.alert('Lỗi', `Không thể xóa vĩnh viễn đơn: ${err?.message || 'Thử lại'}`);
+    }
+  };
+
+  const handleDeleteAllCancelledPrompt = () => {
+    const cancelledOrders = orders.filter((o) => o.status === 'cancelled');
+    if (cancelledOrders.length === 0) return;
+
+    setConfirmConfig({
+      visible: true,
+      title: '🗑️ Xóa tất cả đơn đã hủy',
+      message: `Bạn có chắc chắn muốn XÓA VĨNH VIỄN toàn bộ ${cancelledOrders.length} đơn đã hủy của ngày này không?\n\n⚠️ Dữ liệu sẽ bị xóa hoàn toàn khỏi cơ sở dữ liệu và không thể khôi phục.`,
+      confirmText: `Xóa vĩnh viễn ${cancelledOrders.length} đơn`,
+      cancelText: 'Hủy bỏ',
+      confirmType: 'danger',
+      onConfirm: async () => {
+        setConfirmConfig((prev) => ({ ...prev, visible: false }));
+        try {
+          const ids = cancelledOrders.map((o) => o.id);
+          await supabase.from('order_items').delete().in('order_id', ids);
+          const { error } = await supabase.from('orders').delete().in('id', ids);
+          if (error) throw error;
+
+          toastSuccess(`Đã xóa vĩnh viễn ${cancelledOrders.length} đơn đã hủy!`);
+          fetchOrdersForDate(selectedDate);
+        } catch (err: any) {
+          Alert.alert('Lỗi', `Không thể xóa: ${err?.message || 'Thử lại'}`);
+        }
+      },
+    });
+  };
+
   const formatTimeStr = (isoString: string) => {
     const d = new Date(isoString);
     const hours = d.getHours().toString().padStart(2, '0');
@@ -386,6 +447,39 @@ export default function OrdersHistoryScreen() {
         </Text>
       </View>
 
+      {/* Daily Revenue Summary Card */}
+      {(() => {
+        const paidOrders = orders.filter((o) => o.status === 'paid');
+        const totalDayRevenue = paidOrders.reduce((s, o) => s + (o.total_amount || 0), 0);
+        const totalPaidCount = paidOrders.length;
+        const cancelledOrders = orders.filter((o) => o.status === 'cancelled');
+        const totalCancelledCount = cancelledOrders.length;
+
+        return (
+          <View style={styles.dayRevenueCard}>
+            <View style={styles.dayRevLeft}>
+              <Text style={styles.dayRevLabel}>Doanh thu ngày ({formattedDateStr}):</Text>
+              <Text style={styles.dayRevAmount}>{formatVND(totalDayRevenue)}</Text>
+            </View>
+            <View style={styles.dayRevRight}>
+              <View style={styles.paidBadge}>
+                <Text style={styles.paidBadgeText}>✓ {totalPaidCount} đơn thành công</Text>
+              </View>
+              {totalCancelledCount > 0 && (
+                <TouchableOpacity
+                  id="btn-delete-all-cancelled"
+                  style={styles.btnDeleteAllCancelled}
+                  onPress={handleDeleteAllCancelledPrompt}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.btnDeleteAllCancelledText}>🗑️ Xóa {totalCancelledCount} đơn hủy</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        );
+      })()}
+
       {/* Orders List */}
       {loading ? (
         <ActivityIndicator size="large" color={COLORS.primary} style={{ marginTop: 40 }} />
@@ -461,14 +555,24 @@ export default function OrdersHistoryScreen() {
                   </View>
 
                   {isCancelled ? (
-                    <TouchableOpacity
-                      id={`btn-direct-restore-${item.id}`}
-                      style={styles.cardDirectRestoreBtn}
-                      onPress={() => handleRestoreOrderPrompt(item)}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={styles.cardDirectRestoreText}>Khôi phục</Text>
-                    </TouchableOpacity>
+                    <View style={styles.cardActionsRow}>
+                      <TouchableOpacity
+                        id={`btn-direct-restore-${item.id}`}
+                        style={styles.cardDirectRestoreBtn}
+                        onPress={() => handleRestoreOrderPrompt(item)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.cardDirectRestoreText}>Khôi phục</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        id={`btn-direct-permanent-delete-${item.id}`}
+                        style={styles.cardDirectPermanentDeleteBtn}
+                        onPress={() => handleDeletePermanentPrompt(item)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.cardDirectPermanentDeleteText}>Xóa vĩnh viễn</Text>
+                      </TouchableOpacity>
+                    </View>
                   ) : (
                     <TouchableOpacity
                       id={`btn-direct-cancel-${item.id}`}
@@ -476,7 +580,7 @@ export default function OrdersHistoryScreen() {
                       onPress={() => handleCancelOrderPrompt(item)}
                       activeOpacity={0.8}
                     >
-                      <Text style={styles.cardDirectDeleteText}>Xóa đơn</Text>
+                      <Text style={styles.cardDirectDeleteText}>Hủy đơn</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -588,13 +692,23 @@ export default function OrdersHistoryScreen() {
                 {/* Modal Footer Actions */}
                 <View style={styles.modalFooter}>
                   {selectedOrder.status === 'cancelled' ? (
-                    <TouchableOpacity
-                      id="btn-restore-order-modal"
-                      style={styles.btnRestoreOrder}
-                      onPress={() => handleRestoreOrderPrompt(selectedOrder)}
-                    >
-                      <Text style={styles.btnRestoreOrderText}>🔄 Khôi phục đơn hàng</Text>
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', gap: 8, flex: 2 }}>
+                      <TouchableOpacity
+                        id="btn-restore-order-modal"
+                        style={[styles.btnRestoreOrder, { flex: 1 }]}
+                        onPress={() => handleRestoreOrderPrompt(selectedOrder)}
+                      >
+                        <Text style={styles.btnRestoreOrderText}>🔄 Khôi phục</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        id="btn-delete-perm-order-modal"
+                        style={[styles.btnDeletePermOrder, { flex: 1 }]}
+                        onPress={() => handleDeletePermanentPrompt(selectedOrder)}
+                      >
+                        <Text style={styles.btnDeletePermOrderText}>🗑️ Xóa vĩnh viễn</Text>
+                      </TouchableOpacity>
+                    </View>
                   ) : (
                     <TouchableOpacity
                       id="btn-cancel-order-modal"
@@ -759,8 +873,23 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 6,
   },
-  backBtn: { marginBottom: 8 },
-  backText: { fontFamily: 'Nunito_700Bold', fontSize: 14, color: COLORS.primary },
+  backBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(197, 160, 89, 0.4)',
+    marginBottom: 10,
+  },
+  backText: {
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 13,
+    color: '#234635',
+  },
   title: { fontFamily: 'Nunito_700Bold', fontSize: 22, color: COLORS.primaryDeep, marginBottom: 2 },
   subtitle: { fontFamily: 'Inter_400Regular', fontSize: 13, color: COLORS.textSecondary },
 
@@ -883,7 +1012,7 @@ const styles = StyleSheet.create({
   },
   cardDirectRestoreBtn: {
     backgroundColor: COLORS.primaryLight,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 12,
     alignItems: 'center',
@@ -893,8 +1022,103 @@ const styles = StyleSheet.create({
   },
   cardDirectRestoreText: {
     fontFamily: 'Nunito_700Bold',
-    fontSize: 13,
+    fontSize: 12,
     color: COLORS.primaryDeep,
+  },
+  dayRevenueCard: {
+    backgroundColor: '#FAF7F0',
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(197, 160, 89, 0.35)',
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    elevation: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  dayRevLeft: {
+    flex: 1,
+  },
+  dayRevLabel: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 11.5,
+    color: COLORS.textSecondary,
+    marginBottom: 2,
+  },
+  dayRevAmount: {
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 20,
+    color: COLORS.primaryDeep,
+  },
+  dayRevRight: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  paidBadge: {
+    backgroundColor: '#EAF5EE',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#D8E8DF',
+  },
+  paidBadgeText: {
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 11.5,
+    color: COLORS.primaryDeep,
+  },
+  btnDeleteAllCancelled: {
+    backgroundColor: '#FDE8E8',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#F8B4B4',
+  },
+  btnDeleteAllCancelledText: {
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 11,
+    color: '#9B1C1C',
+  },
+  cardActionsRow: {
+    flexDirection: 'row',
+    gap: 6,
+    alignItems: 'center',
+  },
+  cardDirectPermanentDeleteBtn: {
+    backgroundColor: '#FDE8E8',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#F8B4B4',
+  },
+  cardDirectPermanentDeleteText: {
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 12,
+    color: '#9B1C1C',
+  },
+  btnDeletePermOrder: {
+    backgroundColor: '#FDE8E8',
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#F8B4B4',
+  },
+  btnDeletePermOrderText: {
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 14,
+    color: '#9B1C1C',
   },
 
   // Modal styles

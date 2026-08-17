@@ -57,12 +57,6 @@ interface TopProduct {
   total_revenue: number;
 }
 
-interface HourlyStat {
-  hour_of_day: number;
-  order_count: number;
-  total_revenue: number;
-}
-
 export default function DashboardScreen() {
   const router = useRouter();
   const { toast, hide, success: toastSuccess } = useToast();
@@ -97,7 +91,6 @@ export default function DashboardScreen() {
   });
 
   const [topProducts, setTopProducts] = useState<TopProduct[]>([]);
-  const [hourlyStats, setHourlyStats] = useState<HourlyStat[]>([]);
 
   useEffect(() => {
     fetchReportData();
@@ -134,36 +127,31 @@ export default function DashboardScreen() {
           .select('*')
           .eq('status', 'paid');
 
+        let startDateStr = '';
+        let endDateStr = now.toISOString().split('T')[0];
+
         if (filter === 'today') {
-          const startOfDay = new Date();
-          startOfDay.setHours(0, 0, 0, 0);
+          const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
           query = query.gte('paid_at', startOfDay.toISOString());
+          startDateStr = now.toISOString().split('T')[0];
+          endDateStr = startDateStr;
         } else if (filter === 'week') {
-          const startOfWeek = new Date();
-          startOfWeek.setDate(now.getDate() - 7);
+          // Tính từ Thứ 2 đầu tuần hiện tại (00:00:00) đến hiện tại -> Mỗi Thứ 2 sẽ tự động reset
+          const dayOfWeek = now.getDay(); // 0 = CN, 1 = T2, ..., 6 = T7
+          const distanceToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+          const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - distanceToMonday, 0, 0, 0, 0);
           query = query.gte('paid_at', startOfWeek.toISOString());
+          startDateStr = startOfWeek.toISOString().split('T')[0];
         } else if (filter === 'month') {
-          const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+          // Tính từ ngày 1 đầu tháng hiện tại (00:00:00) đến hiện tại -> Ngày 1 hàng tháng sẽ tự động reset
+          const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
           query = query.gte('paid_at', startOfMonth.toISOString());
+          startDateStr = startOfMonth.toISOString().split('T')[0];
         }
 
         const { data: paidOrders } = await query;
         const orders = paidOrders || [];
         setRawOrders(orders as OrderExportData[]);
-
-        // Check if we can also pull from daily_summaries for aggregated completeness
-        let startDateStr = '';
-        let endDateStr = '';
-        if (filter === 'today') {
-          startDateStr = now.toISOString().split('T')[0];
-          endDateStr = startDateStr;
-        } else if (filter === 'week') {
-          startDateStr = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
-          endDateStr = now.toISOString().split('T')[0];
-        } else if (filter === 'month') {
-          startDateStr = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-          endDateStr = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
-        }
 
         const { data: summaryRows } = await supabase
           .from('daily_summaries')
@@ -266,9 +254,6 @@ export default function DashboardScreen() {
 
         // ── TOP SẢN PHẨM BÁN CHẠY (từ các đơn còn lưu) ──────────────────────
         fetchTopProducts(orders.map((o) => o.id));
-
-        // ── THỐNG KÊ THEO KHUNG GIỜ (từ các đơn còn lưu) ─────────────────────
-        calculateHourlyStats(orders);
       }
     } catch (err: any) {
       console.error('Error fetching report:', err);
@@ -277,15 +262,42 @@ export default function DashboardScreen() {
     }
   };
 
-  // Fetch 12 months RPC + detail RPC for year view
+  // Fetch 12 months data + detail for year view
   const fetchYearlyDataAndMonthDetail = async () => {
     try {
-      // 1. Call RPC revenue_by_year(target_year)
-      const { data: yearRes, error: yearErr } = await supabase.rpc('revenue_by_year', {
-        target_year: selectedYear,
-      });
+      const startOfYearStr = `${selectedYear}-01-01T00:00:00`;
+      const endOfYearStr = `${selectedYear}-12-31T23:59:59`;
+      const startOfYearDateOnly = `${selectedYear}-01-01`;
+      const endOfYearDateOnly = `${selectedYear}-12-31`;
 
-      let full12Months: MonthBarData[] = Array.from({ length: 12 }, (_, i) => ({
+      // 1. Fetch all orders, daily summaries, and expenses for this year in parallel
+      const [ordersRes, summariesRes, expRes] = await Promise.all([
+        supabase
+          .from('orders')
+          .select('*')
+          .eq('status', 'paid')
+          .gte('paid_at', startOfYearStr)
+          .lte('paid_at', endOfYearStr),
+        supabase
+          .from('daily_summaries')
+          .select('*')
+          .gte('day', startOfYearDateOnly)
+          .lte('day', endOfYearDateOnly),
+        supabase
+          .from('expenses')
+          .select('*')
+          .gte('expense_date', startOfYearDateOnly)
+          .lte('expense_date', endOfYearDateOnly),
+      ]);
+
+      const paidOrders = ordersRes.data || [];
+      const summaries = summariesRes.data || [];
+      const expensesList = expRes.data || [];
+
+      setRawOrders(paidOrders as OrderExportData[]);
+
+      // Initialize 12 months array
+      const full12Months: MonthBarData[] = Array.from({ length: 12 }, (_, i) => ({
         month: i + 1,
         revenue: 0,
         expense: 0,
@@ -293,64 +305,122 @@ export default function DashboardScreen() {
         order_count: 0,
       }));
 
-      if (yearRes && yearRes.length > 0) {
-        yearRes.forEach((row: any) => {
-          const idx = row.month - 1;
-          if (idx >= 0 && idx < 12) {
-            full12Months[idx].revenue = Number(row.revenue || 0);
-            full12Months[idx].order_count = Number(row.order_count || 0);
-          }
-        });
-      }
-
-      // 2. Fetch 12-month expenses for selectedYear
-      const startOfYearStr = `${selectedYear}-01-01`;
-      const endOfYearStr = `${selectedYear}-12-31`;
-      const { data: yearExp } = await supabase
-        .from('expenses')
-        .select('amount, expense_date')
-        .gte('expense_date', startOfYearStr)
-        .lte('expense_date', endOfYearStr);
-
+      // Group expenses by month
       const expMap: Record<number, number> = {};
       let yearlyTotalExpSum = 0;
-      (yearExp || []).forEach((e) => {
+      expensesList.forEach((e) => {
         const m = new Date(e.expense_date).getMonth() + 1;
         const amt = Number(e.amount || 0);
         expMap[m] = (expMap[m] || 0) + amt;
         yearlyTotalExpSum += amt;
       });
 
-      setTotalExpense(yearlyTotalExpSum);
+      // Group daily revenue and order counts (merge daily_summaries and live orders)
+      const dayMap: Record<string, { revenue: number; order_count: number }> = {};
 
-      full12Months = full12Months.map((m) => {
-        const exp = expMap[m.month] || 0;
-        return {
-          ...m,
-          expense: exp,
-          profit: m.revenue - exp,
+      // 1. Populate from daily_summaries first
+      summaries.forEach((s) => {
+        dayMap[s.day] = {
+          revenue: Number(s.total_revenue || 0),
+          order_count: Number(s.total_orders || 0),
         };
       });
 
-      setYearlyData(full12Months);
-
-      // 3. Call RPC revenue_detail_by_month(target_year, target_month)
-      const { data: monthRes } = await supabase.rpc('revenue_detail_by_month', {
-        target_year: selectedYear,
-        target_month: selectedMonth,
+      // 2. Add or overlay orders from orders table for days not yet in daily_summaries
+      paidOrders.forEach((o) => {
+        if (!o.paid_at) return;
+        const dStr = o.paid_at.split('T')[0];
+        if (!dayMap[dStr]) {
+          dayMap[dStr] = { revenue: 0, order_count: 0 };
+        }
+        if (!summaries.some((s) => s.day === dStr)) {
+          dayMap[dStr].revenue += Number(o.total_amount || 0);
+          dayMap[dStr].order_count += 1;
+        }
       });
 
-      if (monthRes) {
-        setMonthlyDayDetails(
-          monthRes.map((r: any) => ({
-            day: r.day,
-            revenue: Number(r.revenue || 0),
-            order_count: Number(r.order_count || 0),
-          }))
-        );
-      } else {
-        setMonthlyDayDetails([]);
-      }
+      let yearlyCashRev = 0;
+      let yearlyTransferRev = 0;
+      let yearlyTakeawayRev = 0;
+      let yearlyDineInRev = 0;
+      let yearlyTakeawayCount = 0;
+      let yearlyDineInCount = 0;
+
+      paidOrders.forEach((o) => {
+        const amt = Number(o.total_amount || 0);
+        if (o.payment_method === 'cash') yearlyCashRev += amt;
+        else yearlyTransferRev += amt;
+        if (o.order_type === 'takeaway') {
+          yearlyTakeawayRev += amt;
+          yearlyTakeawayCount += 1;
+        } else {
+          yearlyDineInRev += amt;
+          yearlyDineInCount += 1;
+        }
+      });
+
+      // Distribute into 12 months
+      Object.keys(dayMap).forEach((dStr) => {
+        const d = new Date(dStr);
+        if (d.getFullYear() === selectedYear) {
+          const m = d.getMonth() + 1;
+          const idx = m - 1;
+          if (idx >= 0 && idx < 12) {
+            full12Months[idx].revenue += dayMap[dStr].revenue;
+            full12Months[idx].order_count += dayMap[dStr].order_count;
+          }
+        }
+      });
+
+      let yearlyTotalRevSum = 0;
+      let yearlyTotalOrdersCount = 0;
+
+      full12Months.forEach((m) => {
+        const exp = expMap[m.month] || 0;
+        m.expense = exp;
+        m.profit = m.revenue - exp;
+        yearlyTotalRevSum += m.revenue;
+        yearlyTotalOrdersCount += m.order_count;
+      });
+
+      setTotalExpense(yearlyTotalExpSum);
+      setYearlyData(full12Months);
+
+      setStats({
+        totalRevenue: yearlyTotalRevSum,
+        totalOrders: yearlyTotalOrdersCount,
+        cashRevenue: yearlyCashRev,
+        transferRevenue: yearlyTransferRev,
+        takeawayRevenue: yearlyTakeawayRev,
+        dineInRevenue: yearlyDineInRev,
+        takeawayCount: yearlyTakeawayCount,
+        dineInCount: yearlyDineInCount,
+        prevMonthRevenue: 0,
+        growthPercent: null,
+      });
+
+      // 3. Compute daily details for selectedMonth (e.g. Month 8)
+      const daysInSelectedMonth: Record<number, { revenue: number; order_count: number }> = {};
+      Object.keys(dayMap).forEach((dStr) => {
+        const d = new Date(dStr);
+        if (d.getFullYear() === selectedYear && d.getMonth() + 1 === selectedMonth) {
+          const dayNum = d.getDate();
+          daysInSelectedMonth[dayNum] = dayMap[dStr];
+        }
+      });
+
+      const dayDetailsList = Object.keys(daysInSelectedMonth)
+        .map((dayStr) => ({
+          day: Number(dayStr),
+          revenue: daysInSelectedMonth[Number(dayStr)].revenue,
+          order_count: daysInSelectedMonth[Number(dayStr)].order_count,
+        }))
+        .sort((a, b) => a.day - b.day);
+
+      setMonthlyDayDetails(dayDetailsList);
+
+      // Top products for the year
+      fetchTopProducts(paidOrders.map((o) => o.id));
     } catch (err) {
       console.error('Yearly analytics error:', err);
     }
@@ -400,32 +470,15 @@ export default function DashboardScreen() {
     }
   };
 
-  const calculateHourlyStats = (orders: any[]) => {
-    const hoursArr: HourlyStat[] = Array.from({ length: 24 }, (_, i) => ({
-      hour_of_day: i,
-      order_count: 0,
-      total_revenue: 0,
-    }));
-
-    orders.forEach((o) => {
-      const paidDate = o.paid_at ? new Date(o.paid_at) : new Date(o.created_at);
-      const h = paidDate.getHours();
-      hoursArr[h].order_count += 1;
-      hoursArr[h].total_revenue += Number(o.total_amount || 0);
-    });
-
-    setHourlyStats(hoursArr.filter((h) => h.order_count > 0));
-  };
-
   const formatVND = (amount: number) => amount.toLocaleString('vi-VN') + 'đ';
 
   const maxYearlyRev = Math.max(...yearlyData.map((d) => d.revenue), 1);
   const maxTopSold = Math.max(...topProducts.map((p) => p.total_sold), 1);
 
   const getFilterTitle = () => {
-    if (filter === 'today') return 'Hôm nay';
-    if (filter === 'week') return 'Tuần này';
-    if (filter === 'month') return 'Tháng này';
+    if (filter === 'today') return 'Theo ngày';
+    if (filter === 'week') return 'Theo tuần';
+    if (filter === 'month') return 'Theo tháng';
     return `Năm ${selectedYear}`;
   };
 
@@ -449,34 +502,14 @@ export default function DashboardScreen() {
             <Text style={styles.backText}>← Quay lại</Text>
           </TouchableOpacity>
 
-          <View style={styles.headerRightBtns}>
-            <TouchableOpacity
-              id="btn-goto-expenses"
-              style={styles.expensesNavBtn}
-              onPress={() => router.push('/expenses' as any)}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.expensesNavText}>💸 Chi phí</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              id="btn-goto-history"
-              style={styles.historyNavBtn}
-              onPress={() => router.push('/orders-history' as any)}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.historyNavText}>📜 Lịch sử</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              id="btn-export-csv"
-              style={styles.exportCsvBtn}
-              onPress={() => exportRevenueToCsv(rawOrders, getFilterTitle())}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.exportCsvText}>Xuất Excel</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            id="btn-export-csv"
+            style={styles.exportCsvBtn}
+            onPress={() => exportRevenueToCsv(rawOrders, getFilterTitle())}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.exportCsvText}>📥 Xuất Excel</Text>
+          </TouchableOpacity>
         </View>
         <Text style={styles.title}>📊 Báo cáo doanh thu & Lợi nhuận</Text>
         <Text style={styles.subtitle}>Thống kê kinh doanh Chúc Chúc</Text>
@@ -489,21 +522,21 @@ export default function DashboardScreen() {
           style={[styles.filterChip, filter === 'today' && styles.filterChipActive]}
           onPress={() => setFilter('today')}
         >
-          <Text style={[styles.filterText, filter === 'today' && styles.filterTextActive]}>Hôm nay</Text>
+          <Text style={[styles.filterText, filter === 'today' && styles.filterTextActive]}>Theo ngày</Text>
         </TouchableOpacity>
         <TouchableOpacity
           id="btn-filter-week"
           style={[styles.filterChip, filter === 'week' && styles.filterChipActive]}
           onPress={() => setFilter('week')}
         >
-          <Text style={[styles.filterText, filter === 'week' && styles.filterTextActive]}>Tuần này</Text>
+          <Text style={[styles.filterText, filter === 'week' && styles.filterTextActive]}>Theo tuần</Text>
         </TouchableOpacity>
         <TouchableOpacity
           id="btn-filter-month"
           style={[styles.filterChip, filter === 'month' && styles.filterChipActive]}
           onPress={() => setFilter('month')}
         >
-          <Text style={[styles.filterText, filter === 'month' && styles.filterTextActive]}>Tháng này</Text>
+          <Text style={[styles.filterText, filter === 'month' && styles.filterTextActive]}>Theo tháng</Text>
         </TouchableOpacity>
         <TouchableOpacity
           id="btn-filter-year"
@@ -522,8 +555,81 @@ export default function DashboardScreen() {
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} />}
         >
-          {filter === 'year' ? (
-            /* ── CHART VẼ 12 THÁNG TRONG NĂM (YEARLY BAR CHART) ────────────────── */
+          {/* 1. Summary Total Card with Revenue, Expenses & Profit Breakdown */}
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>BÁO CÁO KINH DOANH ({getFilterTitle().toUpperCase()})</Text>
+
+            <View style={styles.profitBreakdownBox}>
+              <View style={styles.profitRow}>
+                <Text style={styles.profitLabel}>Doanh thu:</Text>
+                <Text style={styles.profitRevValue}>{formatVND(stats.totalRevenue)}</Text>
+              </View>
+
+              <View style={styles.profitRow}>
+                <Text style={styles.profitLabel}>Chi phí:</Text>
+                <Text style={styles.profitExpValue}>- {formatVND(totalExpense)}</Text>
+              </View>
+
+              <View style={styles.profitDivider} />
+
+              <View style={styles.profitRow}>
+                <Text style={styles.profitTotalLabel}>Lợi nhuận thực tế:</Text>
+                <View style={styles.profitBadgeWrap}>
+                  <Text
+                    style={[
+                      styles.profitTotalValue,
+                      stats.totalRevenue - totalExpense >= 0 ? styles.textProfit : styles.textLoss,
+                    ]}
+                  >
+                    {formatVND(stats.totalRevenue - totalExpense)}
+                  </Text>
+                  <Text style={styles.profitBadgeEmoji}>
+                    {stats.totalRevenue - totalExpense >= 0 ? ' 🟢' : ' 🔴'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* MoM Growth badge (only in Month view) */}
+            {filter === 'month' && stats.growthPercent !== null && (
+              <View
+                style={[
+                  styles.growthBadge,
+                  stats.growthPercent >= 0 ? styles.growthBadgeUp : styles.growthBadgeDown,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.growthText,
+                    stats.growthPercent >= 0 ? styles.growthTextUp : styles.growthTextDown,
+                  ]}
+                >
+                  {stats.growthPercent >= 0 ? '▲ +' : '▼ '}
+                  {stats.growthPercent}% doanh thu so với tháng trước ({formatVND(stats.prevMonthRevenue)})
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* 2. Dedicated Full-width Order Count Card */}
+          <View style={styles.orderStatCard}>
+            <View style={styles.orderStatLeft}>
+              <View style={styles.orderStatIconBox}>
+                <Text style={styles.orderStatEmoji}>🧾</Text>
+              </View>
+              <View>
+                <Text style={styles.orderStatTitle}>Tổng số đơn hàng</Text>
+                <Text style={styles.orderStatSub}>Đơn đã hoàn thành ({getFilterTitle()})</Text>
+              </View>
+            </View>
+            <View style={styles.orderStatRight}>
+              <Text style={styles.orderStatNumber}>{stats.totalOrders}</Text>
+              <Text style={styles.orderStatUnit}>đơn hàng</Text>
+            </View>
+          </View>
+
+          {/* 2. 12-Month Bar Chart & Month Drilldown (Only in Year filter) */}
+          {filter === 'year' && (
             <View style={styles.yearChartCard}>
               <View style={styles.chartHeader}>
                 <View>
@@ -620,7 +726,7 @@ export default function DashboardScreen() {
                   📅 Chi tiết từng ngày trong Tháng {selectedMonth}/{selectedYear}
                 </Text>
                 {monthlyDayDetails.length === 0 ? (
-                  <Text style={styles.emptyText}>Tháng này chưa có đơn hàng nào.</Text>
+                  <Text style={styles.emptyText}>Tháng {selectedMonth} chưa có đơn hàng nào.</Text>
                 ) : (
                   <View style={styles.dayGrid}>
                     {monthlyDayDetails.map((dayItem) => (
@@ -634,144 +740,67 @@ export default function DashboardScreen() {
                 )}
               </View>
             </View>
-          ) : (
-            /* ── CHẾ ĐỘ XEM NGÀY / TUẦN / THÁNG ────────────────────────────────── */
-            <>
-              {/* Summary Total Card with Revenue, Expenses & Profit Breakdown */}
-              <View style={styles.summaryCard}>
-                <View style={styles.summaryTop}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.summaryLabel}>BÁO CÁO KINH DOANH ({getFilterTitle().toUpperCase()})</Text>
+          )}
 
-                    <View style={styles.profitBreakdownBox}>
-                      <View style={styles.profitRow}>
-                        <Text style={styles.profitLabel}>Doanh thu:</Text>
-                        <Text style={styles.profitRevValue}>{formatVND(stats.totalRevenue)}</Text>
+          {/* 3. Payment Methods Split (All Filters) */}
+          <View style={styles.splitRow}>
+            <View style={[styles.splitCard, { backgroundColor: '#E3F2FD' }]}>
+              <Text style={styles.splitEmoji}>💵</Text>
+              <Text style={styles.splitTitle}>Tiền mặt</Text>
+              <Text style={styles.splitAmount}>{formatVND(stats.cashRevenue)}</Text>
+              <Text style={styles.splitPct}>
+                {stats.totalRevenue > 0
+                  ? `${Math.round((stats.cashRevenue / stats.totalRevenue) * 100)}%`
+                  : '0%'}
+              </Text>
+            </View>
+
+            <View style={[styles.splitCard, { backgroundColor: '#F3E5F5' }]}>
+              <Text style={styles.splitEmoji}>📲</Text>
+              <Text style={styles.splitTitle}>Chuyển khoản / QR</Text>
+              <Text style={styles.splitAmount}>{formatVND(stats.transferRevenue)}</Text>
+              <Text style={styles.splitPct}>
+                {stats.totalRevenue > 0
+                  ? `${Math.round((stats.transferRevenue / stats.totalRevenue) * 100)}%`
+                  : '0%'}
+              </Text>
+            </View>
+          </View>
+
+          {/* 4. Order Type Split (Takeaway vs Dine-in - All Filters) */}
+          <View style={styles.splitRow}>
+            <View style={[styles.splitCard, { backgroundColor: '#E8F5E9' }]}>
+              <Text style={styles.splitEmoji}>🛍️</Text>
+              <Text style={styles.splitTitle}>Mang về</Text>
+              <Text style={styles.splitAmount}>{formatVND(stats.takeawayRevenue)}</Text>
+              <Text style={styles.splitPct}>{stats.takeawayCount} đơn hàng</Text>
+            </View>
+
+            <View style={[styles.splitCard, { backgroundColor: '#FFF3E0' }]}>
+              <Text style={styles.splitEmoji}>🪑</Text>
+              <Text style={styles.splitTitle}>Tại bàn</Text>
+              <Text style={styles.splitAmount}>{formatVND(stats.dineInRevenue)}</Text>
+              <Text style={styles.splitPct}>{stats.dineInCount} đơn hàng</Text>
+            </View>
+          </View>
+
+          {/* 5. Top Selling Products (All Filters) */}
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>🔥 Top món bán chạy nhất</Text>
+            {topProducts.length === 0 ? (
+              <Text style={styles.emptyText}>Chưa có dữ liệu bán hàng trong kỳ này.</Text>
+            ) : (
+              topProducts.map((p, idx) => {
+                const widthPct = (p.total_sold / maxTopSold) * 100;
+                return (
+                  <View key={p.id} style={styles.topProdRow}>
+                    <Text style={styles.topRank}>#{idx + 1}</Text>
+                    <View style={styles.topInfo}>
+                      <View style={styles.topTitleRow}>
+                        <Text style={styles.topName}>{p.name}</Text>
+                        <Text style={styles.topSold}>{p.total_sold} món</Text>
                       </View>
-
-                      <View style={styles.profitRow}>
-                        <Text style={styles.profitLabel}>Chi phí:</Text>
-                        <Text style={styles.profitExpValue}>- {formatVND(totalExpense)}</Text>
-                      </View>
-
-                      <View style={styles.profitDivider} />
-
-                      <View style={styles.profitRow}>
-                        <Text style={styles.profitTotalLabel}>Lợi nhuận thực tế:</Text>
-                        <View style={styles.profitBadgeWrap}>
-                          <Text
-                            style={[
-                              styles.profitTotalValue,
-                              stats.totalRevenue - totalExpense >= 0 ? styles.textProfit : styles.textLoss,
-                            ]}
-                          >
-                            {formatVND(stats.totalRevenue - totalExpense)}
-                          </Text>
-                          <Text style={styles.profitBadgeEmoji}>
-                            {stats.totalRevenue - totalExpense >= 0 ? ' 🟢' : ' 🔴'}
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-                  </View>
-
-                  <View style={styles.orderCountBadge}>
-                    <Text style={styles.orderCountNum}>{stats.totalOrders}</Text>
-                    <Text style={styles.orderCountLabel}>đơn hàng</Text>
-                  </View>
-                </View>
-
-                {/* MoM Growth badge (only in Month view) */}
-                {filter === 'month' && stats.growthPercent !== null && (
-                  <View
-                    style={[
-                      styles.growthBadge,
-                      stats.growthPercent >= 0 ? styles.growthBadgeUp : styles.growthBadgeDown,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.growthText,
-                        stats.growthPercent >= 0 ? styles.growthTextUp : styles.growthTextDown,
-                      ]}
-                    >
-                      {stats.growthPercent >= 0 ? '▲ +' : '▼ '}
-                      {stats.growthPercent}% doanh thu so với tháng trước ({formatVND(stats.prevMonthRevenue)})
-                    </Text>
-                  </View>
-                )}
-
-                <View style={styles.summaryDivider} />
-
-                <View style={styles.avgRow}>
-                  <Text style={styles.avgLabel}>Giá trị trung bình / đơn:</Text>
-                  <Text style={styles.avgValue}>
-                    {stats.totalOrders > 0
-                      ? formatVND(Math.round(stats.totalRevenue / stats.totalOrders))
-                      : '0đ'}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Payment Methods Split */}
-              <View style={styles.splitRow}>
-                <View style={[styles.splitCard, { backgroundColor: '#E3F2FD' }]}>
-                  <Text style={styles.splitEmoji}>💵</Text>
-                  <Text style={styles.splitTitle}>Tiền mặt</Text>
-                  <Text style={styles.splitAmount}>{formatVND(stats.cashRevenue)}</Text>
-                  <Text style={styles.splitPct}>
-                    {stats.totalRevenue > 0
-                      ? `${Math.round((stats.cashRevenue / stats.totalRevenue) * 100)}%`
-                      : '0%'}
-                  </Text>
-                </View>
-
-                <View style={[styles.splitCard, { backgroundColor: '#F3E5F5' }]}>
-                  <Text style={styles.splitEmoji}>📲</Text>
-                  <Text style={styles.splitTitle}>Chuyển khoản / QR</Text>
-                  <Text style={styles.splitAmount}>{formatVND(stats.transferRevenue)}</Text>
-                  <Text style={styles.splitPct}>
-                    {stats.totalRevenue > 0
-                      ? `${Math.round((stats.transferRevenue / stats.totalRevenue) * 100)}%`
-                      : '0%'}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Order Type Split (Takeaway vs Dine-in) */}
-              <View style={styles.splitRow}>
-                <View style={[styles.splitCard, { backgroundColor: '#E8F5E9' }]}>
-                  <Text style={styles.splitEmoji}>🛍️</Text>
-                  <Text style={styles.splitTitle}>Mang về</Text>
-                  <Text style={styles.splitAmount}>{formatVND(stats.takeawayRevenue)}</Text>
-                  <Text style={styles.splitPct}>{stats.takeawayCount} đơn hàng</Text>
-                </View>
-
-                <View style={[styles.splitCard, { backgroundColor: '#FFF3E0' }]}>
-                  <Text style={styles.splitEmoji}>🪑</Text>
-                  <Text style={styles.splitTitle}>Tại bàn</Text>
-                  <Text style={styles.splitAmount}>{formatVND(stats.dineInRevenue)}</Text>
-                  <Text style={styles.splitPct}>{stats.dineInCount} đơn hàng</Text>
-                </View>
-              </View>
-
-              {/* Top Selling Products */}
-              <View style={styles.sectionCard}>
-                <Text style={styles.sectionTitle}>🔥 Top món bán chạy nhất</Text>
-                {topProducts.length === 0 ? (
-                  <Text style={styles.emptyText}>Chưa có dữ liệu bán hàng trong kỳ này.</Text>
-                ) : (
-                  topProducts.map((p, idx) => {
-                    const widthPct = (p.total_sold / maxTopSold) * 100;
-                    return (
-                      <View key={p.id} style={styles.topProdRow}>
-                        <Text style={styles.topRank}>#{idx + 1}</Text>
-                        <View style={styles.topInfo}>
-                          <View style={styles.topTitleRow}>
-                            <Text style={styles.topName}>{p.name}</Text>
-                            <Text style={styles.topSold}>{p.total_sold} món</Text>
-                          </View>
-                          <View style={styles.progressTrack}>
+                      <View style={styles.progressTrack}>
                             <View style={[styles.progressFill, { width: `${widthPct}%` }]} />
                           </View>
                           <Text style={styles.topRev}>{formatVND(p.total_revenue)}</Text>
@@ -781,24 +810,6 @@ export default function DashboardScreen() {
                   })
                 )}
               </View>
-
-              {/* Peak Hours Breakdown */}
-              <View style={styles.sectionCard}>
-                <Text style={styles.sectionTitle}>⏰ Giờ cao điểm (Theo khung giờ)</Text>
-                {hourlyStats.length === 0 ? (
-                  <Text style={styles.emptyText}>Chưa có đơn hàng trong khoảng thời gian này.</Text>
-                ) : (
-                  hourlyStats.map((h) => (
-                    <View key={h.hour_of_day} style={styles.hourRow}>
-                      <Text style={styles.hourTime}>{h.hour_of_day}:00 - {h.hour_of_day + 1}:00</Text>
-                      <Text style={styles.hourOrders}>{h.order_count} đơn</Text>
-                      <Text style={styles.hourRev}>{formatVND(h.total_revenue)}</Text>
-                    </View>
-                  ))
-                )}
-              </View>
-            </>
-          )}
         </ScrollView>
       )}
       <Toast {...toast} onHide={hide} />
@@ -818,58 +829,60 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.blob1,
   },
   header: {
+    backgroundColor: '#FAF7F0',
     paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingTop: 12,
+    paddingBottom: 16,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    borderBottomWidth: 1.5,
+    borderColor: 'rgba(197, 160, 89, 0.35)',
+    shadowColor: 'rgba(35, 70, 53, 0.08)',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 10,
+    elevation: 5,
+    marginBottom: 14,
   },
   headerTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 10,
   },
-  backBtn: {},
-  backText: { fontFamily: 'Inter_500Medium', fontSize: 14, color: COLORS.primary },
-  headerRightBtns: {
+  backBtn: {
     flexDirection: 'row',
-    gap: 8,
     alignItems: 'center',
-  },
-  historyNavBtn: {
-    backgroundColor: COLORS.primaryLight,
-    paddingHorizontal: 10,
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: COLORS.primary,
+    borderColor: 'rgba(197, 160, 89, 0.4)',
   },
-  historyNavText: { fontFamily: 'Nunito_700Bold', fontSize: 12, color: COLORS.primaryDeep },
-  expensesNavBtn: {
-    backgroundColor: '#FEF3C7',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#D97706',
+  backText: {
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 13,
+    color: '#234635',
   },
-  expensesNavText: { fontFamily: 'Nunito_700Bold', fontSize: 12, color: '#B45309' },
   exportCsvBtn: {
-    backgroundColor: COLORS.white,
-    paddingHorizontal: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: COLORS.primary,
+    borderColor: 'rgba(197, 160, 89, 0.4)',
     shadowColor: COLORS.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 2,
   },
-  exportCsvText: { fontFamily: 'Nunito_700Bold', fontSize: 12, color: COLORS.primary },
+  exportCsvText: { fontFamily: 'Nunito_700Bold', fontSize: 12.5, color: '#234635' },
 
-  title: { fontFamily: 'Nunito_700Bold', fontSize: 24, color: COLORS.textPrimary, marginBottom: 2 },
-  subtitle: { fontFamily: 'Inter_400Regular', fontSize: 13, color: COLORS.textSecondary },
+  title: { fontFamily: 'Nunito_700Bold', fontSize: 20, color: '#234635', letterSpacing: 0.3, marginBottom: 3 },
+  subtitle: { fontFamily: 'Inter_400Regular', fontSize: 12.5, color: '#657E70' },
 
   chartSubTitle: { fontFamily: 'Inter_400Regular', fontSize: 12, color: COLORS.textMuted },
   chartModeRow: { flexDirection: 'row', gap: 8, marginVertical: 10 },
@@ -955,6 +968,64 @@ const styles = StyleSheet.create({
   growthText: { fontFamily: 'Nunito_700Bold', fontSize: 12 },
   growthTextUp: { color: COLORS.primary },
   growthTextDown: { color: COLORS.danger },
+
+  orderStatCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: 20,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    shadowColor: COLORS.shadow,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 1,
+    shadowRadius: 10,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(62, 124, 93, 0.15)',
+  },
+  orderStatLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  orderStatIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#EAF5EE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#D8E8DF',
+  },
+  orderStatEmoji: {
+    fontSize: 22,
+  },
+  orderStatTitle: {
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 15,
+    color: COLORS.textPrimary,
+    marginBottom: 2,
+  },
+  orderStatSub: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 12,
+    color: COLORS.textMuted,
+  },
+  orderStatRight: {
+    alignItems: 'flex-end',
+  },
+  orderStatNumber: {
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 22,
+    color: COLORS.primaryDeep,
+  },
+  orderStatUnit: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
 
   summaryDivider: { height: 1, backgroundColor: COLORS.divider, marginVertical: 14 },
   avgRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

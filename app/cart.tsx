@@ -127,7 +127,7 @@ export default function CartScreen() {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity id="btn-back-cart" onPress={handleBack} style={styles.backTouch}>
-          <Text style={styles.backText}>←</Text>
+          <Text style={styles.backText}>← Quay lại</Text>
         </TouchableOpacity>
         <View style={styles.headerInfo}>
           <Text style={styles.headerTitle}>Giỏ hàng</Text>
@@ -308,11 +308,21 @@ const styles = StyleSheet.create({
     elevation: 6,
     gap: 8,
   },
-  backTouch: { paddingRight: 4 },
+  backTouch: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(197, 160, 89, 0.4)',
+    marginRight: 8,
+  },
   backText: {
     fontFamily: 'Nunito_700Bold',
-    fontSize: 24,
-    color: COLORS.primary,
+    fontSize: 13,
+    color: '#234635',
   },
   headerInfo: { flex: 1 },
   headerTitle: {

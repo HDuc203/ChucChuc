@@ -37,6 +37,9 @@ export default function TableSelectScreen() {
   const [tables, setTables] = useState<Table[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Summaries: { [tableId]: { itemCount, total } } for occupied tables
+  const [tableSummaries, setTableSummaries] = useState<Record<string, { itemCount: number; total: number }>>({});
+
   // Modal for occupied table options
   const [selectedOccupiedTable, setSelectedOccupiedTable] = useState<Table | null>(null);
   const [occupiedOrder, setOccupiedOrder] = useState<Order | null>(null);
@@ -77,8 +80,50 @@ export default function TableSelectScreen() {
         return numA - numB;
       });
       setTables(sorted);
+      // Also fetch summaries for occupied tables
+      const occupied = sorted.filter((t) => t.status === 'occupied');
+      if (occupied.length > 0) {
+        fetchTableSummaries(occupied.map((t) => t.id));
+      } else {
+        setTableSummaries({});
+      }
     }
     setLoading(false);
+  };
+
+  const fetchTableSummaries = async (tableIds: string[]) => {
+    try {
+      // Get all open orders for occupied tables
+      const { data: orders } = await supabase
+        .from('orders')
+        .select('id, table_id, total_amount')
+        .in('table_id', tableIds)
+        .eq('status', 'open');
+
+      if (!orders || orders.length === 0) { setTableSummaries({}); return; }
+
+      // Get item counts per order
+      const orderIds = orders.map((o) => o.id);
+      const { data: items } = await supabase
+        .from('order_items')
+        .select('order_id, quantity')
+        .in('order_id', orderIds);
+
+      // Build summary map by table_id
+      const summaries: Record<string, { itemCount: number; total: number }> = {};
+      for (const order of orders) {
+        if (!order.table_id) continue;
+        const orderItems = (items || []).filter((it) => it.order_id === order.id);
+        const itemCount = orderItems.reduce((s, it) => s + (it.quantity || 0), 0);
+        summaries[order.table_id] = {
+          itemCount,
+          total: order.total_amount || 0,
+        };
+      }
+      setTableSummaries(summaries);
+    } catch {
+      // Non-critical
+    }
   };
 
   // Helper to load order items for an occupied table
@@ -304,13 +349,21 @@ export default function TableSelectScreen() {
   const occupiedTables = tables.filter((t) => t.status === 'occupied');
   const cleaningTables = tables.filter((t) => t.status === 'needs_cleaning');
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.blob1} />
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity id="btn-back-table" onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity id="btn-back-table" onPress={handleBack} style={styles.backBtn}>
           <Text style={styles.backText}>← Quay lại</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Quản lý bàn ({tables.length} bàn)</Text>
@@ -319,15 +372,15 @@ export default function TableSelectScreen() {
 
       {/* Legend / Status Stats Pills */}
       <View style={styles.legend}>
-        <View style={[styles.legendPill, { backgroundColor: '#EAF5EC' }]}>
+        <View style={[styles.legendPill, { backgroundColor: '#EAF5EE', borderColor: '#D8E8DF' }]}>
           <Text style={[styles.legendPillText, { color: COLORS.primaryDeep }]}>🌱 Trống ({emptyTables.length})</Text>
         </View>
-        <View style={[styles.legendPill, { backgroundColor: '#FFF3E0' }]}>
-          <Text style={[styles.legendPillText, { color: '#E65100' }]}>🪑 Có khách ({occupiedTables.length})</Text>
+        <View style={[styles.legendPill, { backgroundColor: '#FAF0E8', borderColor: '#F5D8C8' }]}>
+          <Text style={[styles.legendPillText, { color: '#B84E20' }]}>🪑 Có khách ({occupiedTables.length})</Text>
         </View>
         {cleaningTables.length > 0 && (
-          <View style={[styles.legendPill, { backgroundColor: '#FFFDE7' }]}>
-            <Text style={[styles.legendPillText, { color: '#F57F17' }]}>🧹 Cần dọn ({cleaningTables.length})</Text>
+          <View style={[styles.legendPill, { backgroundColor: '#FAF7EE', borderColor: '#F0E5C0' }]}>
+            <Text style={[styles.legendPillText, { color: '#8A6818' }]}>🧹 Cần dọn ({cleaningTables.length})</Text>
           </View>
         )}
       </View>
@@ -344,6 +397,7 @@ export default function TableSelectScreen() {
           renderItem={({ item }) => {
             const isOccupied = item.status === 'occupied';
             const isNeedsCleaning = item.status === 'needs_cleaning';
+            const summary = isOccupied ? tableSummaries[item.id] : undefined;
 
             return (
               <TouchableOpacity
@@ -359,8 +413,13 @@ export default function TableSelectScreen() {
                 onPress={() => handleSelectTable(item)}
                 activeOpacity={0.85}
               >
+                {/* Table name */}
                 <View style={styles.tableCardHeader}>
-                  <Text style={styles.tableNumberText}>
+                  <Text style={[
+                    styles.tableNumberText,
+                    isOccupied && { color: '#B03500' },
+                    isNeedsCleaning && { color: '#9A6B00' },
+                  ]}>
                     {item.name}
                   </Text>
                 </View>
@@ -389,6 +448,17 @@ export default function TableSelectScreen() {
                     {getStatusLabel(item.status)}
                   </Text>
                 </View>
+
+                {/* Occupied: show item count + running total */}
+                {isOccupied && summary && (
+                  <View style={styles.tableSummaryBox}>
+                    <Text style={styles.tableSummaryItems}>{summary.itemCount} món</Text>
+                    <Text style={styles.tableSummaryTotal}>{summary.total.toLocaleString('vi-VN')}đ</Text>
+                  </View>
+                )}
+                {isOccupied && !summary && (
+                  <Text style={styles.tableSummaryLoading}>...</Text>
+                )}
               </TouchableOpacity>
             );
           }}
@@ -544,12 +614,57 @@ const styles = StyleSheet.create({
     borderRadius: 90,
     backgroundColor: COLORS.blob1,
   },
-  header: { paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 },
-  backBtn: { marginBottom: 12 },
-  backText: { fontFamily: 'Inter_500Medium', fontSize: 14, color: COLORS.primary },
-  title: { fontFamily: 'Nunito_700Bold', fontSize: 26, color: COLORS.textPrimary, marginBottom: 4 },
-  subtitle: { fontFamily: 'Inter_400Regular', fontSize: 13, color: COLORS.textSecondary },
-  legend: { flexDirection: 'row', gap: 10, paddingHorizontal: 24, marginBottom: 16 },
+  header: {
+    backgroundColor: '#FAF7F0',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 16,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    borderBottomWidth: 1.5,
+    borderColor: 'rgba(197, 160, 89, 0.35)',
+    shadowColor: 'rgba(35, 70, 53, 0.08)',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 10,
+    elevation: 5,
+    marginBottom: 14,
+  },
+  backBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(197, 160, 89, 0.4)',
+    marginBottom: 10,
+  },
+  backText: {
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 13,
+    color: '#234635',
+  },
+  title: {
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 22,
+    color: '#234635',
+    letterSpacing: 0.3,
+    marginBottom: 3,
+  },
+  subtitle: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 12.5,
+    color: '#657E70',
+  },
+  legend: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 20,
+    marginBottom: 14,
+  },
   legendPill: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -565,7 +680,7 @@ const styles = StyleSheet.create({
   tableCard: {
     flex: 1,
     borderRadius: 22,
-    paddingVertical: 20,
+    paddingVertical: 22,
     paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
@@ -574,26 +689,55 @@ const styles = StyleSheet.create({
     shadowOpacity: 1,
     shadowRadius: 10,
     elevation: 4,
-    borderWidth: 1.5,
+    borderWidth: 2,
+    minHeight: 110,
   },
   tableCardEmpty: {
     backgroundColor: '#FFFFFF',
-    borderColor: COLORS.primaryLight,
+    borderColor: '#D8E8DF',
   },
   tableCardOccupied: {
-    backgroundColor: '#FFF8F5',
-    borderColor: 'rgba(244,133,90,0.4)',
+    backgroundColor: '#FCF6F0',
+    borderColor: '#E6A885',
+    shadowColor: 'rgba(217,119,70,0.2)',
   },
   tableCardCleaning: {
-    backgroundColor: '#FFFDE7',
-    borderColor: 'rgba(255,214,0,0.4)',
+    backgroundColor: '#FAF7EE',
+    borderColor: '#DFCE9C',
   },
 
   tableCardHeader: { alignItems: 'center', marginBottom: 8 },
   tableNumberText: {
     fontFamily: 'Nunito_700Bold',
-    fontSize: 20,
+    fontSize: 18,
     color: COLORS.textPrimary,
+  },
+
+  tableSummaryBox: {
+    marginTop: 8,
+    alignItems: 'center',
+    backgroundColor: '#F5E6DC',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    width: '100%',
+  },
+  tableSummaryItems: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 11,
+    color: '#B84E20',
+    marginBottom: 1,
+  },
+  tableSummaryTotal: {
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 13,
+    color: '#B84E20',
+  },
+  tableSummaryLoading: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginTop: 6,
   },
 
   statusPill: {
@@ -602,13 +746,13 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   statusPillEmpty: { backgroundColor: COLORS.primaryLight },
-  statusPillOccupied: { backgroundColor: 'rgba(244,133,90,0.2)' },
-  statusPillCleaning: { backgroundColor: 'rgba(255,214,0,0.3)' },
+  statusPillOccupied: { backgroundColor: '#FADCCE' },
+  statusPillCleaning: { backgroundColor: '#F6EECD' },
 
   statusPillText: { fontFamily: 'Nunito_700Bold', fontSize: 12 },
   statusTextEmpty: { color: COLORS.primaryDeep },
-  statusTextOccupied: { color: '#D84315' },
-  statusTextCleaning: { color: '#F57F17' },
+  statusTextOccupied: { color: '#B84E20' },
+  statusTextCleaning: { color: '#8A6818' },
 
   // Modal styles
   modalOverlay: {
@@ -620,67 +764,73 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     width: '100%',
-    backgroundColor: COLORS.white,
-    borderRadius: 24,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 26,
+    borderWidth: 1.5,
+    borderColor: 'rgba(197, 160, 89, 0.45)',
+    padding: 22,
+    shadowColor: 'rgba(35, 70, 53, 0.2)',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 1,
+    shadowRadius: 18,
     elevation: 10,
   },
-  modalHeader: { alignItems: 'center', marginBottom: 12 },
-  modalTitle: { fontFamily: 'Nunito_700Bold', fontSize: 22, color: COLORS.textPrimary },
-  modalSubTitle: { fontFamily: 'Inter_400Regular', fontSize: 13, color: COLORS.textSecondary },
+  modalHeader: { alignItems: 'center', marginBottom: 14 },
+  modalTitle: { fontFamily: 'Nunito_700Bold', fontSize: 22, color: '#234635' },
+  modalSubTitle: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#657E70' },
   occupiedItemsBox: {
-    backgroundColor: COLORS.background,
-    borderRadius: 14,
-    padding: 12,
+    backgroundColor: '#F8F5EE',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(197, 160, 89, 0.25)',
+    padding: 14,
     marginBottom: 16,
     gap: 6,
   },
-  occupiedItemsHeader: { fontFamily: 'Nunito_600SemiBold', fontSize: 13, color: COLORS.textSecondary },
+  occupiedItemsHeader: { fontFamily: 'Nunito_600SemiBold', fontSize: 13, color: '#566C60' },
   emptyItemsText: { fontFamily: 'Inter_400Regular', fontSize: 13, color: COLORS.textMuted, fontStyle: 'italic' },
   occupiedItemRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  occupiedItemName: { fontFamily: 'Inter_400Regular', fontSize: 13, color: COLORS.textPrimary },
-  occupiedItemPrice: { fontFamily: 'Nunito_600SemiBold', fontSize: 13, color: COLORS.textSecondary },
+  occupiedItemName: { fontFamily: 'Inter_400Regular', fontSize: 13, color: '#23382D' },
+  occupiedItemPrice: { fontFamily: 'Nunito_600SemiBold', fontSize: 13, color: '#566C60' },
   occupiedTotalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     borderTopWidth: 1,
-    borderColor: COLORS.divider,
-    paddingTop: 6,
+    borderColor: '#E8E2D5',
+    paddingTop: 8,
     marginTop: 4,
   },
-  occupiedTotalLabel: { fontFamily: 'Nunito_700Bold', fontSize: 14, color: COLORS.textPrimary },
-  occupiedTotalValue: { fontFamily: 'Nunito_700Bold', fontSize: 15, color: COLORS.primary },
+  occupiedTotalLabel: { fontFamily: 'Nunito_700Bold', fontSize: 14, color: '#23382D' },
+  occupiedTotalValue: { fontFamily: 'Nunito_700Bold', fontSize: 16, color: '#3E7C5D' },
   actionButtons: { gap: 10 },
   actionBtn: {
-    borderRadius: 14,
+    borderRadius: 16,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  actionAddBtn: { backgroundColor: COLORS.primary },
+  actionAddBtn: { backgroundColor: '#3E7C5D', borderWidth: 1, borderColor: 'rgba(197, 160, 89, 0.4)' },
   actionAddText: { fontFamily: 'Nunito_700Bold', fontSize: 15, color: COLORS.white },
-  actionPayBtn: { backgroundColor: COLORS.tableOccupied },
+  actionPayBtn: { backgroundColor: '#D97746' },
   actionPayText: { fontFamily: 'Nunito_700Bold', fontSize: 15, color: COLORS.white },
   actionRowHalf: { flexDirection: 'row', gap: 10 },
-  actionTransferBtn: { flex: 1, backgroundColor: COLORS.background, borderWidth: 1, borderColor: COLORS.primary },
-  actionTransferText: { fontFamily: 'Nunito_600SemiBold', fontSize: 13, color: COLORS.primary },
-  actionCancelBtn: { flex: 1, backgroundColor: '#FFEBEE', borderWidth: 1, borderColor: COLORS.danger },
-  actionCancelText: { fontFamily: 'Nunito_600SemiBold', fontSize: 13, color: COLORS.danger },
+  actionTransferBtn: { flex: 1, backgroundColor: '#F8F5EE', borderWidth: 1.5, borderColor: '#3E7C5D' },
+  actionTransferText: { fontFamily: 'Nunito_600SemiBold', fontSize: 13, color: '#3E7C5D' },
+  actionCancelBtn: { flex: 1, backgroundColor: '#FCECEC', borderWidth: 1, borderColor: '#D94D4D' },
+  actionCancelText: { fontFamily: 'Nunito_600SemiBold', fontSize: 13, color: '#D94D4D' },
   transferItemCard: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 14,
-    borderRadius: 12,
-    backgroundColor: COLORS.background,
+    borderRadius: 14,
+    backgroundColor: '#F8F5EE',
+    borderWidth: 1,
+    borderColor: 'rgba(197, 160, 89, 0.3)',
     marginBottom: 8,
   },
-  transferItemText: { fontFamily: 'Nunito_700Bold', fontSize: 15, color: COLORS.textPrimary },
-  transferItemBadge: { fontFamily: 'Inter_500Medium', fontSize: 12, color: COLORS.primary },
+  transferItemText: { fontFamily: 'Nunito_700Bold', fontSize: 15, color: '#23382D' },
+  transferItemBadge: { fontFamily: 'Inter_500Medium', fontSize: 12, color: '#3E7C5D' },
   closeBtn: { paddingVertical: 12, alignItems: 'center', marginTop: 8 },
   closeBtnText: { fontFamily: 'Inter_500Medium', fontSize: 14, color: COLORS.textMuted },
 });

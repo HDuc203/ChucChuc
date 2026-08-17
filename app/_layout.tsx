@@ -36,6 +36,7 @@ export default function RootLayout() {
         <Stack.Screen name="dashboard" />
         <Stack.Screen name="manage" />
         <Stack.Screen name="orders-history" />
+        <Stack.Screen name="expenses" />
       </Stack>
     </>
   );

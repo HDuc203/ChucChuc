@@ -39,6 +39,8 @@ interface RevenueStats {
 interface MonthBarData {
   month: number;
   revenue: number;
+  expense: number;
+  profit: number;
   order_count: number;
 }
 
@@ -68,6 +70,9 @@ export default function DashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Chart Mode Toggle: 'revenue' | 'profit' | 'expense'
+  const [chartMode, setChartMode] = useState<'revenue' | 'profit' | 'expense'>('revenue');
+
   // Year Selection state for Year view
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1); // 1 - 12
@@ -76,6 +81,7 @@ export default function DashboardScreen() {
   const [yearlyData, setYearlyData] = useState<MonthBarData[]>([]);
   const [monthlyDayDetails, setMonthlyDayDetails] = useState<DayDetailData[]>([]);
   const [rawOrders, setRawOrders] = useState<OrderExportData[]>([]);
+  const [totalExpense, setTotalExpense] = useState<number>(0);
 
   const [stats, setStats] = useState<RevenueStats>({
     totalRevenue: 0,
@@ -113,6 +119,16 @@ export default function DashboardScreen() {
         await fetchYearlyDataAndMonthDetail();
       } else {
         // ── THỐNG KÊ NGÀY / TUẦN / THÁNG ────────────────────────────────────
+        let totalRev = 0;
+        let cashRev = 0;
+        let transferRev = 0;
+        let takeawayRev = 0;
+        let dineInRev = 0;
+        let takeawayCnt = 0;
+        let dineInCnt = 0;
+        let totalOrdersCount = 0;
+        let totalExp = 0;
+
         let query = supabase
           .from('orders')
           .select('*')
@@ -131,68 +147,113 @@ export default function DashboardScreen() {
           query = query.gte('paid_at', startOfMonth.toISOString());
         }
 
-        const { data: paidOrders, error: ordersError } = await query;
-        if (ordersError) throw ordersError;
-
+        const { data: paidOrders } = await query;
         const orders = paidOrders || [];
         setRawOrders(orders as OrderExportData[]);
 
-        // Calculate totals
-        let totalRev = 0;
-        let cashRev = 0;
-        let transferRev = 0;
-        let takeawayRev = 0;
-        let dineInRev = 0;
-        let takeawayCnt = 0;
-        let dineInCnt = 0;
+        // Check if we can also pull from daily_summaries for aggregated completeness
+        let startDateStr = '';
+        let endDateStr = '';
+        if (filter === 'today') {
+          startDateStr = now.toISOString().split('T')[0];
+          endDateStr = startDateStr;
+        } else if (filter === 'week') {
+          startDateStr = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+          endDateStr = now.toISOString().split('T')[0];
+        } else if (filter === 'month') {
+          startDateStr = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+          endDateStr = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+        }
 
-        orders.forEach((o) => {
-          const amt = Number(o.total_amount || 0);
-          totalRev += amt;
+        const { data: summaryRows } = await supabase
+          .from('daily_summaries')
+          .select('*')
+          .gte('day', startDateStr)
+          .lte('day', endDateStr);
 
-          if (o.payment_method === 'cash') {
-            cashRev += amt;
-          } else {
-            transferRev += amt;
+        if (summaryRows && summaryRows.length > 0 && filter !== 'today') {
+          // Use permanent aggregated daily summaries
+          summaryRows.forEach((row) => {
+            totalRev += Number(row.total_revenue || 0);
+            totalOrdersCount += Number(row.total_orders || 0);
+            cashRev += Number(row.cash_revenue || 0);
+            transferRev += Number(row.transfer_revenue || 0);
+            takeawayRev += Number(row.takeaway_revenue || 0);
+            dineInRev += Number(row.dine_in_revenue || 0);
+            totalExp += Number(row.total_expense || 0);
+          });
+        } else {
+          // Compute directly from orders list
+          orders.forEach((o) => {
+            const amt = Number(o.total_amount || 0);
+            totalRev += amt;
+            if (o.payment_method === 'cash') cashRev += amt;
+            else transferRev += amt;
+            if (o.order_type === 'takeaway') {
+              takeawayRev += amt;
+              takeawayCnt += 1;
+            } else {
+              dineInRev += amt;
+              dineInCnt += 1;
+            }
+          });
+          totalOrdersCount = orders.length;
+
+          // Fetch expenses directly
+          let expQuery = supabase.from('expenses').select('amount, expense_date');
+          if (filter === 'today') {
+            expQuery = expQuery.gte('expense_date', startDateStr);
+          } else if (filter === 'week') {
+            expQuery = expQuery.gte('expense_date', startDateStr);
+          } else if (filter === 'month') {
+            expQuery = expQuery.gte('expense_date', startDateStr);
           }
+          const { data: expData } = await expQuery;
+          totalExp = (expData || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+        }
 
-          if (o.order_type === 'takeaway') {
-            takeawayRev += amt;
-            takeawayCnt += 1;
-          } else {
-            dineInRev += amt;
-            dineInCnt += 1;
-          }
-        });
-
-        // Growth calculation for Month view
+        // Growth calculation for Month view (pull from permanent daily_summaries or orders)
         let prevRev = 0;
         let calculatedGrowth: number | null = null;
 
         if (filter === 'month') {
-          const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-          const startOfPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          const startOfPrevMonthStr = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0];
+          const endOfPrevMonthStr = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0];
 
-          const { data: prevOrders } = await supabase
-            .from('orders')
-            .select('total_amount')
-            .eq('status', 'paid')
-            .gte('paid_at', startOfPrevMonth.toISOString())
-            .lt('paid_at', startOfCurrentMonth.toISOString());
+          const { data: prevSummaries } = await supabase
+            .from('daily_summaries')
+            .select('total_revenue')
+            .gte('day', startOfPrevMonthStr)
+            .lte('day', endOfPrevMonthStr);
 
-          if (prevOrders && prevOrders.length > 0) {
-            prevRev = prevOrders.reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
-            if (prevRev > 0) {
-              calculatedGrowth = Math.round(((totalRev - prevRev) / prevRev) * 100 * 10) / 10;
-            } else if (totalRev > 0) {
-              calculatedGrowth = 100;
+          if (prevSummaries && prevSummaries.length > 0) {
+            prevRev = prevSummaries.reduce((sum, r) => sum + Number(r.total_revenue || 0), 0);
+          } else {
+            const startOfPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+            const { data: prevOrders } = await supabase
+              .from('orders')
+              .select('total_amount')
+              .eq('status', 'paid')
+              .gte('paid_at', startOfPrevMonth.toISOString())
+              .lt('paid_at', startOfCurrentMonth.toISOString());
+
+            if (prevOrders && prevOrders.length > 0) {
+              prevRev = prevOrders.reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
             }
+          }
+
+          if (prevRev > 0) {
+            calculatedGrowth = Math.round(((totalRev - prevRev) / prevRev) * 100 * 10) / 10;
+          } else if (totalRev > 0) {
+            calculatedGrowth = 100;
           }
         }
 
+        setTotalExpense(totalExp);
         setStats({
           totalRevenue: totalRev,
-          totalOrders: orders.length,
+          totalOrders: totalOrdersCount,
           cashRevenue: cashRev,
           transferRevenue: transferRev,
           takeawayRevenue: takeawayRev,
@@ -203,10 +264,10 @@ export default function DashboardScreen() {
           growthPercent: calculatedGrowth,
         });
 
-        // ── TOP SẢN PHẨM BÁN CHẠY ───────────────────────────────────────────
+        // ── TOP SẢN PHẨM BÁN CHẠY (từ các đơn còn lưu) ──────────────────────
         fetchTopProducts(orders.map((o) => o.id));
 
-        // ── THỐNG KÊ THEO KHUNG GIỜ ──────────────────────────────────────────
+        // ── THỐNG KÊ THEO KHUNG GIỜ (từ các đơn còn lưu) ─────────────────────
         calculateHourlyStats(orders);
       }
     } catch (err: any) {
@@ -227,6 +288,8 @@ export default function DashboardScreen() {
       let full12Months: MonthBarData[] = Array.from({ length: 12 }, (_, i) => ({
         month: i + 1,
         revenue: 0,
+        expense: 0,
+        profit: 0,
         order_count: 0,
       }));
 
@@ -239,9 +302,39 @@ export default function DashboardScreen() {
           }
         });
       }
+
+      // 2. Fetch 12-month expenses for selectedYear
+      const startOfYearStr = `${selectedYear}-01-01`;
+      const endOfYearStr = `${selectedYear}-12-31`;
+      const { data: yearExp } = await supabase
+        .from('expenses')
+        .select('amount, expense_date')
+        .gte('expense_date', startOfYearStr)
+        .lte('expense_date', endOfYearStr);
+
+      const expMap: Record<number, number> = {};
+      let yearlyTotalExpSum = 0;
+      (yearExp || []).forEach((e) => {
+        const m = new Date(e.expense_date).getMonth() + 1;
+        const amt = Number(e.amount || 0);
+        expMap[m] = (expMap[m] || 0) + amt;
+        yearlyTotalExpSum += amt;
+      });
+
+      setTotalExpense(yearlyTotalExpSum);
+
+      full12Months = full12Months.map((m) => {
+        const exp = expMap[m.month] || 0;
+        return {
+          ...m,
+          expense: exp,
+          profit: m.revenue - exp,
+        };
+      });
+
       setYearlyData(full12Months);
 
-      // 2. Call RPC revenue_detail_by_month(target_year, target_month)
+      // 3. Call RPC revenue_detail_by_month(target_year, target_month)
       const { data: monthRes } = await supabase.rpc('revenue_detail_by_month', {
         target_year: selectedYear,
         target_month: selectedMonth,
@@ -336,6 +429,14 @@ export default function DashboardScreen() {
     return `Năm ${selectedYear}`;
   };
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Background Blobs */}
@@ -344,18 +445,27 @@ export default function DashboardScreen() {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerTopRow}>
-          <TouchableOpacity id="btn-back-dashboard" onPress={() => router.back()} style={styles.backBtn}>
+          <TouchableOpacity id="btn-back-dashboard" onPress={handleBack} style={styles.backBtn}>
             <Text style={styles.backText}>← Quay lại</Text>
           </TouchableOpacity>
 
           <View style={styles.headerRightBtns}>
+            <TouchableOpacity
+              id="btn-goto-expenses"
+              style={styles.expensesNavBtn}
+              onPress={() => router.push('/expenses' as any)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.expensesNavText}>💸 Chi phí</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity
               id="btn-goto-history"
               style={styles.historyNavBtn}
               onPress={() => router.push('/orders-history' as any)}
               activeOpacity={0.8}
             >
-              <Text style={styles.historyNavText}>📜 Lịch sử đơn</Text>
+              <Text style={styles.historyNavText}>📜 Lịch sử</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -364,11 +474,11 @@ export default function DashboardScreen() {
               onPress={() => exportRevenueToCsv(rawOrders, getFilterTitle())}
               activeOpacity={0.8}
             >
-              <Text style={styles.exportCsvText}>Xuất Excel/CSV</Text>
+              <Text style={styles.exportCsvText}>Xuất Excel</Text>
             </TouchableOpacity>
           </View>
         </View>
-        <Text style={styles.title}>📊 Báo cáo doanh thu</Text>
+        <Text style={styles.title}>📊 Báo cáo doanh thu & Lợi nhuận</Text>
         <Text style={styles.subtitle}>Thống kê kinh doanh Chúc Chúc</Text>
       </View>
 
@@ -400,7 +510,7 @@ export default function DashboardScreen() {
           style={[styles.filterChip, filter === 'year' && styles.filterChipActive]}
           onPress={() => setFilter('year')}
         >
-          <Text style={[styles.filterText, filter === 'year' && styles.filterTextActive]}>Theo năm 📅</Text>
+          <Text style={[styles.filterText, filter === 'year' && styles.filterTextActive]}>Theo năm</Text>
         </TouchableOpacity>
       </View>
 
@@ -416,7 +526,11 @@ export default function DashboardScreen() {
             /* ── CHART VẼ 12 THÁNG TRONG NĂM (YEARLY BAR CHART) ────────────────── */
             <View style={styles.yearChartCard}>
               <View style={styles.chartHeader}>
-                <Text style={styles.chartTitle}>Doanh thu 12 tháng năm {selectedYear}</Text>
+                <View>
+                  <Text style={styles.chartTitle}>Phân tích 12 tháng năm {selectedYear}</Text>
+                  <Text style={styles.chartSubTitle}>Chạm vào cột tháng để xem chi tiết</Text>
+                </View>
+
                 <View style={styles.yearPickerRow}>
                   <TouchableOpacity
                     style={styles.yearPickBtn}
@@ -434,11 +548,45 @@ export default function DashboardScreen() {
                 </View>
               </View>
 
+              {/* Chart Mode Toggle */}
+              <View style={styles.chartModeRow}>
+                <TouchableOpacity
+                  style={[styles.chartModeBtn, chartMode === 'revenue' && styles.chartModeBtnActiveRev]}
+                  onPress={() => setChartMode('revenue')}
+                >
+                  <Text style={[styles.chartModeText, chartMode === 'revenue' && styles.chartModeTextActive]}>
+                    📊 Doanh thu
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.chartModeBtn, chartMode === 'profit' && styles.chartModeBtnActiveProf]}
+                  onPress={() => setChartMode('profit')}
+                >
+                  <Text style={[styles.chartModeText, chartMode === 'profit' && styles.chartModeTextActive]}>
+                    📈 Lợi nhuận
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.chartModeBtn, chartMode === 'expense' && styles.chartModeBtnActiveExp]}
+                  onPress={() => setChartMode('expense')}
+                >
+                  <Text style={[styles.chartModeText, chartMode === 'expense' && styles.chartModeTextActive]}>
+                    💸 Chi phí
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
               {/* 12-Month Bar Chart */}
               <View style={styles.barChartContainer}>
                 {yearlyData.map((item) => {
-                  const barHeightPct = (item.revenue / maxYearlyRev) * 100;
+                  const val = chartMode === 'revenue' ? item.revenue : chartMode === 'profit' ? Math.max(item.profit, 0) : item.expense;
+                  const maxVal = Math.max(...yearlyData.map((d) => chartMode === 'revenue' ? d.revenue : chartMode === 'profit' ? Math.max(d.profit, 0) : d.expense), 1);
+                  const barHeightPct = (val / maxVal) * 100;
                   const isSelected = item.month === selectedMonth;
+
+                  const barFillBg = chartMode === 'profit' ? '#10B981' : chartMode === 'expense' ? '#EF4444' : COLORS.primary;
 
                   return (
                     <TouchableOpacity
@@ -447,13 +595,13 @@ export default function DashboardScreen() {
                       onPress={() => setSelectedMonth(item.month)}
                     >
                       <Text style={styles.barValueLabel}>
-                        {item.revenue > 0 ? `${Math.round(item.revenue / 1000)}k` : ''}
+                        {val > 0 ? `${Math.round(val / 1000)}k` : ''}
                       </Text>
                       <View style={styles.barTrack}>
                         <View
                           style={[
                             styles.barFill,
-                            { height: `${Math.max(barHeightPct, 4)}%` },
+                            { height: `${Math.max(barHeightPct, 4)}%`, backgroundColor: barFillBg },
                             isSelected && styles.barFillSelected,
                           ]}
                         />
@@ -489,13 +637,44 @@ export default function DashboardScreen() {
           ) : (
             /* ── CHẾ ĐỘ XEM NGÀY / TUẦN / THÁNG ────────────────────────────────── */
             <>
-              {/* Summary Total Card */}
+              {/* Summary Total Card with Revenue, Expenses & Profit Breakdown */}
               <View style={styles.summaryCard}>
                 <View style={styles.summaryTop}>
-                  <View>
-                    <Text style={styles.summaryLabel}>TỔNG DOANH THU ({getFilterTitle().toUpperCase()})</Text>
-                    <Text style={styles.summaryRevenue}>{formatVND(stats.totalRevenue)}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.summaryLabel}>BÁO CÁO KINH DOANH ({getFilterTitle().toUpperCase()})</Text>
+
+                    <View style={styles.profitBreakdownBox}>
+                      <View style={styles.profitRow}>
+                        <Text style={styles.profitLabel}>Doanh thu:</Text>
+                        <Text style={styles.profitRevValue}>{formatVND(stats.totalRevenue)}</Text>
+                      </View>
+
+                      <View style={styles.profitRow}>
+                        <Text style={styles.profitLabel}>Chi phí:</Text>
+                        <Text style={styles.profitExpValue}>- {formatVND(totalExpense)}</Text>
+                      </View>
+
+                      <View style={styles.profitDivider} />
+
+                      <View style={styles.profitRow}>
+                        <Text style={styles.profitTotalLabel}>Lợi nhuận thực tế:</Text>
+                        <View style={styles.profitBadgeWrap}>
+                          <Text
+                            style={[
+                              styles.profitTotalValue,
+                              stats.totalRevenue - totalExpense >= 0 ? styles.textProfit : styles.textLoss,
+                            ]}
+                          >
+                            {formatVND(stats.totalRevenue - totalExpense)}
+                          </Text>
+                          <Text style={styles.profitBadgeEmoji}>
+                            {stats.totalRevenue - totalExpense >= 0 ? ' 🟢' : ' 🔴'}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
                   </View>
+
                   <View style={styles.orderCountBadge}>
                     <Text style={styles.orderCountNum}>{stats.totalOrders}</Text>
                     <Text style={styles.orderCountLabel}>đơn hàng</Text>
@@ -517,7 +696,7 @@ export default function DashboardScreen() {
                       ]}
                     >
                       {stats.growthPercent >= 0 ? '▲ +' : '▼ '}
-                      {stats.growthPercent}% so với tháng trước ({formatVND(stats.prevMonthRevenue)})
+                      {stats.growthPercent}% doanh thu so với tháng trước ({formatVND(stats.prevMonthRevenue)})
                     </Text>
                   </View>
                 )}
@@ -658,16 +837,25 @@ const styles = StyleSheet.create({
   },
   historyNavBtn: {
     backgroundColor: COLORS.primaryLight,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: COLORS.primary,
   },
   historyNavText: { fontFamily: 'Nunito_700Bold', fontSize: 12, color: COLORS.primaryDeep },
+  expensesNavBtn: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#D97706',
+  },
+  expensesNavText: { fontFamily: 'Nunito_700Bold', fontSize: 12, color: '#B45309' },
   exportCsvBtn: {
     backgroundColor: COLORS.white,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 12,
     borderWidth: 1,
@@ -682,6 +870,36 @@ const styles = StyleSheet.create({
 
   title: { fontFamily: 'Nunito_700Bold', fontSize: 24, color: COLORS.textPrimary, marginBottom: 2 },
   subtitle: { fontFamily: 'Inter_400Regular', fontSize: 13, color: COLORS.textSecondary },
+
+  chartSubTitle: { fontFamily: 'Inter_400Regular', fontSize: 12, color: COLORS.textMuted },
+  chartModeRow: { flexDirection: 'row', gap: 8, marginVertical: 10 },
+  chartModeBtn: {
+    flex: 1,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: COLORS.background,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+  },
+  chartModeBtnActiveRev: { backgroundColor: COLORS.primaryLight, borderColor: COLORS.primary },
+  chartModeBtnActiveProf: { backgroundColor: '#DCFCE7', borderColor: '#10B981' },
+  chartModeBtnActiveExp: { backgroundColor: '#FEE2E2', borderColor: '#EF4444' },
+  chartModeText: { fontFamily: 'Inter_500Medium', fontSize: 12, color: COLORS.textSecondary },
+  chartModeTextActive: { fontFamily: 'Nunito_700Bold', color: COLORS.textPrimary },
+
+  profitBreakdownBox: { marginTop: 10, gap: 4 },
+  profitRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  profitLabel: { fontFamily: 'Inter_500Medium', fontSize: 13, color: COLORS.textSecondary },
+  profitRevValue: { fontFamily: 'Nunito_700Bold', fontSize: 15, color: COLORS.primaryDeep },
+  profitExpValue: { fontFamily: 'Nunito_700Bold', fontSize: 15, color: COLORS.danger },
+  profitDivider: { height: 1, backgroundColor: COLORS.divider, marginVertical: 4 },
+  profitTotalLabel: { fontFamily: 'Nunito_700Bold', fontSize: 15, color: COLORS.textPrimary },
+  profitBadgeWrap: { flexDirection: 'row', alignItems: 'center' },
+  profitTotalValue: { fontFamily: 'Nunito_700Bold', fontSize: 18 },
+  profitBadgeEmoji: { fontSize: 14 },
+  textProfit: { color: '#16A34A' },
+  textLoss: { color: '#DC2626' },
 
   filterRow: {
     flexDirection: 'row',

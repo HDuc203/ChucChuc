@@ -12,3 +12,15 @@ export const formatNumberDot = (amount: number | string | null | undefined): str
   const num = Math.round(Number(amount));
   return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 };
+
+export const formatNumberInput = (val: string): string => {
+  const raw = val.replace(/\D/g, '');
+  if (!raw) return '';
+  const num = parseInt(raw, 10);
+  return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+};
+
+export const parseNumberInput = (val: string): number => {
+  const raw = val.replace(/\D/g, '');
+  return parseInt(raw, 10) || 0;
+};

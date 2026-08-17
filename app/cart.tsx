@@ -114,11 +114,19 @@ export default function CartScreen() {
       ? '🛍️ Mang về'
       : `🪑 ${selectedTable?.name ?? 'Tại bàn'}`;
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity id="btn-back-cart" onPress={() => router.back()} style={styles.backTouch}>
+        <TouchableOpacity id="btn-back-cart" onPress={handleBack} style={styles.backTouch}>
           <Text style={styles.backText}>←</Text>
         </TouchableOpacity>
         <View style={styles.headerInfo}>

@@ -20,7 +20,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
 import { COLORS } from '../constants/colors';
 import { Category, Product } from '../types';
-import { formatVND } from '../utils/format';
+import { formatVND, formatNumberDot, formatNumberInput, parseNumberInput } from '../utils/format';
 import Toast from '../components/Toast';
 import ConfirmModal from '../components/ConfirmModal';
 import { useToast } from '../hooks/useToast';
@@ -179,7 +179,7 @@ export default function ManageScreen() {
   const openEditProductModal = (product: Product) => {
     setEditingProduct(product);
     setProdName(product.name);
-    setProdPrice(product.price.toString());
+    setProdPrice(formatNumberDot(product.price));
     setProdCategoryId(product.category_id);
     setSelectedImageUri(product.image_url);
     setProdIsAvailable(product.is_available);
@@ -191,8 +191,8 @@ export default function ManageScreen() {
       Alert.alert('Chưa nhập tên', 'Vui lòng nhập tên sản phẩm.');
       return;
     }
-    const priceNum = parseInt(prodPrice.replace(/[^0-9]/g, ''), 10);
-    if (isNaN(priceNum) || priceNum <= 0) {
+    const priceNum = parseNumberInput(prodPrice);
+    if (priceNum <= 0) {
       Alert.alert('Giá không hợp lệ', 'Giá sản phẩm phải lớn hơn 0đ.');
       return;
     }
@@ -464,13 +464,21 @@ export default function ManageScreen() {
     return matchCat && matchSearch;
   });
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.blob1} />
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity id="btn-back-manage" onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity id="btn-back-manage" onPress={handleBack} style={styles.backBtn}>
           <Text style={styles.backText}>← Quay lại</Text>
         </TouchableOpacity>
         <Text style={styles.title}>🛠️ Quản lý & Cài đặt</Text>
@@ -679,11 +687,11 @@ export default function ManageScreen() {
               <TextInput
                 id="input-prod-price"
                 style={styles.modalInput}
-                placeholder="Ví dụ: 30000"
+                placeholder="Ví dụ: 30.000"
                 placeholderTextColor={COLORS.textMuted}
                 keyboardType="numeric"
                 value={prodPrice}
-                onChangeText={setProdPrice}
+                onChangeText={(text) => setProdPrice(formatNumberInput(text))}
               />
 
               {/* Category Selector */}

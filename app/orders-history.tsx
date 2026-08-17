@@ -64,8 +64,36 @@ export default function OrdersHistoryScreen() {
   const formattedDateStr = selectedDate.toISOString().split('T')[0];
 
   useEffect(() => {
+    // Silently trigger 7-day retention sync & cleanup
+    const runCleanup = async () => {
+      try {
+        await supabase.rpc('cleanup_old_orders', { retention_days: 7 });
+      } catch {
+        // Silent
+      }
+    };
+    runCleanup();
+  }, []);
+
+  useEffect(() => {
     fetchOrdersForDate(selectedDate);
   }, [selectedDate]);
+
+  // 7 most recent days for quick selection (0 = Today, 6 = 6 days ago)
+  const recent7Days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
+
+  const isSameDay = (d1: Date, d2: Date) => {
+    return (
+      d1.getDate() === d2.getDate() &&
+      d1.getMonth() === d2.getMonth() &&
+      d1.getFullYear() === d2.getFullYear()
+    );
+  };
 
   const fetchOrdersForDate = async (date: Date) => {
     setLoading(true);
@@ -291,11 +319,19 @@ export default function OrdersHistoryScreen() {
     return 'Chưa thanh toán';
   };
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity id="btn-back-history" onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity id="btn-back-history" onPress={handleBack} style={styles.backBtn}>
           <Text style={styles.backText}>← Quay lại</Text>
         </TouchableOpacity>
         <Text style={styles.title}>📜 Lịch sử đơn hàng</Text>
@@ -321,6 +357,33 @@ export default function OrdersHistoryScreen() {
         >
           <Text style={styles.dateNavText}>Sau ›</Text>
         </TouchableOpacity>
+      </View>
+
+      {/* 7 Days Quick Selector Chips */}
+      <View style={styles.daysScrollWrapper}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.daysScrollContent}>
+          {recent7Days.map((d, i) => {
+            const isSel = isSameDay(d, selectedDate);
+            const label = i === 0 ? 'Hôm nay' : i === 1 ? 'Hôm qua' : `${d.getDate()}/${d.getMonth() + 1}`;
+            return (
+              <TouchableOpacity
+                key={`day-${i}`}
+                style={[styles.dayChip, isSel && styles.dayChipActive]}
+                onPress={() => setSelectedDate(d)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.dayChipText, isSel && styles.dayChipTextActive]}>{label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {/* Info notice about 7-day retention */}
+      <View style={styles.retentionNotice}>
+        <Text style={styles.retentionNoticeText}>
+          🌿 Lưu chi tiết 7 ngày gần nhất · Doanh thu tháng/năm xem tại Báo cáo
+        </Text>
       </View>
 
       {/* Orders List */}
@@ -726,6 +789,47 @@ const styles = StyleSheet.create({
     borderColor: COLORS.primaryLight,
   },
   dateCurrentText: { fontFamily: 'Nunito_700Bold', fontSize: 14, color: COLORS.primaryDeep },
+
+  daysScrollWrapper: {
+    paddingBottom: 6,
+  },
+  daysScrollContent: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  dayChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 16,
+    backgroundColor: '#FAF7F0',
+    borderWidth: 1,
+    borderColor: 'rgba(197, 160, 89, 0.35)',
+  },
+  dayChipActive: {
+    backgroundColor: '#3E7C5D',
+    borderColor: '#3E7C5D',
+  },
+  dayChipText: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 12,
+    color: '#566C60',
+  },
+  dayChipTextActive: {
+    fontFamily: 'Nunito_700Bold',
+    color: COLORS.white,
+  },
+
+  retentionNotice: {
+    paddingHorizontal: 16,
+    paddingBottom: 6,
+    alignItems: 'center',
+  },
+  retentionNoticeText: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 11,
+    color: '#7D9185',
+    textAlign: 'center',
+  },
 
   listContent: { padding: 16, gap: 12 },
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },

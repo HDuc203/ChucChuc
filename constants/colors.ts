@@ -1,65 +1,66 @@
 export const COLORS = {
-  // ── PASTEL GREEN PALETTE ──────────────────────────────────────
-  background: '#F2FAF5',          // Nền app: mint trắng nhẹ
+  // ── ORIENTAL TEA HOUSE / RICE PAPER & JADE PALETTE ────────────
+  background: '#F8F5EE',          // Nền app: giấy xuyến / mây trà ấm áp
   backgroundCard: '#FFFFFF',
 
-  primary: '#4CAF85',             // Xanh lá pastel đậm — button chính
-  primaryDeep: '#2E7D5F',         // Xanh lá đậm — tiêu đề, icon
-  primaryLight: '#D4EDDE',        // Xanh lá rất nhạt — chip active bg
-  primaryMist: '#EBF7F0',         // Nền nhạt nhất
-  primarySoft: '#A8D8BD',         // Midtone mềm
+  primary: '#3E7C5D',             // Xanh ngọc lục bảo trà — button chính
+  primaryDeep: '#234635',         // Xanh thông mực sâu — tiêu đề, icon chính
+  primaryLight: '#E2EEE6',        // Xanh ngọc nhạt celadon — chip active bg
+  primaryMist: '#F2F8F4',         // Nền nhạt nhất
+  primarySoft: '#9EC4AF',         // Midtone ngọc mềm
 
-  accent: '#66BB9A',              // Xanh ngọc mid
-  mint: '#C8EDD8',                // Decoration, blob
-  sage: '#B2D8C4',                // Blob phụ
+  accent: '#C5A059',              // Vàng kim cổ điển / màu tre ấm
+  accentLight: '#FAF4E8',         // Vàng ấm nhạt
+  mint: '#D2E8DC',                // Decoration, blob
+  sage: '#C0DCCB',                // Blob phụ
 
   // ── CATEGORY CHIPS ────────────────────────────────────────────
-  categoryActive: '#4CAF85',
+  categoryActive: '#3E7C5D',
   categoryActiveText: '#FFFFFF',
-  categoryInactive: '#EDF6F0',
-  categoryInactiveText: '#4A7A61',
+  categoryInactive: '#ECE8DD',
+  categoryInactiveText: '#53685C',
 
   // ── TABLE STATUS ──────────────────────────────────────────────
-  tableEmpty: '#4CAF85',          // Xanh lá = trống
+  tableEmpty: '#3E7C5D',          // Xanh ngọc = trống
   tableEmptyText: '#FFFFFF',
-  tableOccupied: '#F4855A',       // Cam đào pastel = đang dùng
+  tableOccupied: '#D97746',       // Cam đất / gốm đào ấm = có khách
   tableOccupiedText: '#FFFFFF',
-  tableNeedsCleaning: '#B0BEC5',  // Xám xanh = cần dọn
+  tableNeedsCleaning: '#C5A059',  // Vàng tre = cần dọn
   tableNeedsCleaningText: '#FFFFFF',
 
   // ── TEXT ──────────────────────────────────────────────────────
-  textPrimary: '#1B3A2E',
-  textSecondary: '#4A7A61',
-  textMuted: '#9BBBA9',
-  textPrice: '#2E7D5F',
+  textPrimary: '#23382D',
+  textSecondary: '#566C60',
+  textMuted: '#93A89D',
+  textPrice: '#2E6B4F',
 
   // ── ORDER TYPE ────────────────────────────────────────────────
-  orderTypeTakeaway: '#4CAF85',
-  orderTypeDineIn: '#F4855A',
+  orderTypeTakeaway: '#3E7C5D',
+  orderTypeDineIn: '#D97746',
 
   // ── UI ELEMENTS ───────────────────────────────────────────────
-  divider: '#DDF0E6',
-  shadow: 'rgba(76, 175, 133, 0.12)',
-  shadowDeep: 'rgba(46, 125, 95, 0.18)',
-  overlay: 'rgba(27, 58, 46, 0.45)',
-  cartBadge: '#F4855A',
-  danger: '#E05252',
-  dangerLight: '#FDECEA',
-  success: '#4CAF85',
-  successLight: '#E8F8EF',
-  warning: '#F4A460',
-  warningLight: '#FEF3E8',
-  info: '#5BA3C9',
-  infoLight: '#EBF4FA',
+  divider: '#E8E2D5',
+  shadow: 'rgba(40, 60, 50, 0.08)',
+  shadowDeep: 'rgba(35, 70, 53, 0.15)',
+  overlay: 'rgba(30, 50, 40, 0.45)',
+  cartBadge: '#D97746',
+  danger: '#D94D4D',
+  dangerLight: '#FCECEC',
+  success: '#3E7C5D',
+  successLight: '#EAF5EE',
+  warning: '#D99B36',
+  warningLight: '#FDF6E8',
+  info: '#4B88A6',
+  infoLight: '#EBF4F9',
   white: '#FFFFFF',
   black: '#000000',
 
   // ── PAYMENT ───────────────────────────────────────────────────
-  paymentSelected: '#EBF7F0',
-  paymentSelectedBorder: '#4CAF85',
+  paymentSelected: '#F2F8F4',
+  paymentSelectedBorder: '#3E7C5D',
 
   // ── DECORATIVE BLOBS ──────────────────────────────────────────
-  blob1: 'rgba(168, 216, 189, 0.35)',
-  blob2: 'rgba(178, 216, 196, 0.28)',
-  blob3: 'rgba(200, 237, 216, 0.4)',
+  blob1: 'rgba(197, 160, 89, 0.15)',
+  blob2: 'rgba(62, 124, 93, 0.12)',
+  blob3: 'rgba(210, 232, 220, 0.3)',
 };

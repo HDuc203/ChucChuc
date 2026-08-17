@@ -47,6 +47,24 @@ export interface OrderItem {
   products?: Product;
 }
 
+export type ExpenseCategory = 'nguyen_lieu' | 'dien_nuoc' | 'mat_bang' | 'luong' | 'khac';
+
+export interface Expense {
+  id: string;
+  description: string;
+  amount: number;
+  category: ExpenseCategory;
+  expense_date: string;
+  created_at?: string;
+}
+
+export interface MonthlyProfit {
+  month: string;
+  revenue: number;
+  expense: number;
+  profit: number;
+}
+
 // ── Cart Types ───────────────────────────────────────────────────────────────
 
 export interface CartItem {
@@ -71,4 +89,5 @@ export type RootStackParamList = {
   dashboard: undefined;
   manage: undefined;
   'orders-history': undefined;
+  expenses: undefined;
 };

@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  TextInput,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,7 +17,7 @@ import { supabase } from '../lib/supabase';
 import { useCartStore } from '../stores/cartStore';
 import { COLORS } from '../constants/colors';
 import { PaymentMethod } from '../types';
-import { formatVND } from '../utils/format';
+import { formatVND, formatNumberDot, formatNumberInput, parseNumberInput } from '../utils/format';
 import Toast from '../components/Toast';
 import { useToast } from '../hooks/useToast';
 
@@ -31,6 +32,7 @@ export default function PaymentScreen() {
   const { toast, hide, success: toastSuccess } = useToast();
   const { orderType, selectedTable, activeOrderId, items, totalAmount, clearCart } = useCartStore();
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('transfer');
+  const [customerPaidStr, setCustomerPaidStr] = useState<string>('');
   const [loading, setLoading] = useState(false);
 
   // Bank settings state (Defaulting to MB Bank)
@@ -207,11 +209,19 @@ export default function PaymentScreen() {
       ? '🛍️ Mang về'
       : `🪑 ${selectedTable?.name ?? 'Tại bàn'}`;
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity id="btn-back-payment" onPress={() => router.back()} style={styles.backTouch}>
+        <TouchableOpacity id="btn-back-payment" onPress={handleBack} style={styles.backTouch}>
           <Text style={styles.backText}>← Quay lại</Text>
         </TouchableOpacity>
         <View style={styles.headerInfo}>
@@ -243,6 +253,66 @@ export default function PaymentScreen() {
             })}
           </View>
         </View>
+
+        {/* Cash Calculation Card (When Payment Method is Cash) */}
+        {paymentMethod === 'cash' && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>💵 Tính tiền mặt trả khách</Text>
+            
+            <Text style={styles.cashLabel}>Số tiền khách đưa (VND):</Text>
+            <TextInput
+              style={styles.cashInput}
+              placeholder={`Ví dụ: ${formatNumberDot(totalAmount)}`}
+              placeholderTextColor={COLORS.textMuted}
+              keyboardType="numeric"
+              value={customerPaidStr}
+              onChangeText={(text) => setCustomerPaidStr(formatNumberInput(text))}
+            />
+
+            {/* Quick Cash Suggestions */}
+            <Text style={styles.quickLabel}>Gợi ý tiền nhanh:</Text>
+            <View style={styles.quickCashRow}>
+              <TouchableOpacity
+                style={styles.quickCashChipExact}
+                onPress={() => setCustomerPaidStr(formatNumberDot(totalAmount))}
+              >
+                <Text style={styles.quickCashTextExact}>Đủ tiền ({formatVND(totalAmount)})</Text>
+              </TouchableOpacity>
+
+              {[50000, 100000, 200000, 500000].map((amt) => {
+                if (amt >= totalAmount) {
+                  return (
+                    <TouchableOpacity
+                      key={amt}
+                      style={styles.quickCashChip}
+                      onPress={() => setCustomerPaidStr(formatNumberDot(amt))}
+                    >
+                      <Text style={styles.quickCashText}>{formatVND(amt)}</Text>
+                    </TouchableOpacity>
+                  );
+                }
+                return null;
+              })}
+            </View>
+
+            {/* Change Result */}
+            {customerPaidStr !== '' && (
+              <View style={styles.changeResultBox}>
+                <Text style={styles.changeLabel}>Tiền thừa trả lại khách:</Text>
+                <Text
+                  style={[
+                    styles.changeValue,
+                    parseNumberInput(customerPaidStr) - totalAmount >= 0 ? styles.textSuccess : styles.textDanger,
+                  ]}
+                >
+                  {parseNumberInput(customerPaidStr) - totalAmount >= 0
+                    ? formatVND(parseNumberInput(customerPaidStr) - totalAmount)
+                    : `Còn thiếu ${formatVND(totalAmount - parseNumberInput(customerPaidStr))}`}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
 
         {/* Dynamic VietQR Card (for Transfer or QR) */}
         {(paymentMethod === 'transfer' || paymentMethod === 'qr') && (
@@ -562,6 +632,56 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
+
+  // Cash Calculator Styles
+  cashLabel: { fontFamily: 'Inter_500Medium', fontSize: 13, color: COLORS.textSecondary, marginBottom: 4 },
+  cashInput: {
+    backgroundColor: COLORS.categoryInactive,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 18,
+    fontFamily: 'Nunito_700Bold',
+    color: COLORS.primaryDeep,
+    borderWidth: 1.5,
+    borderColor: COLORS.primaryLight,
+    marginBottom: 10,
+  },
+  quickLabel: { fontFamily: 'Inter_500Medium', fontSize: 12, color: COLORS.textMuted, marginBottom: 6 },
+  quickCashRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
+  quickCashChip: {
+    backgroundColor: COLORS.background,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+  },
+  quickCashText: { fontFamily: 'Inter_500Medium', fontSize: 12, color: COLORS.textPrimary },
+  quickCashChipExact: {
+    backgroundColor: COLORS.primaryLight,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+  },
+  quickCashTextExact: { fontFamily: 'Nunito_700Bold', fontSize: 12, color: COLORS.primaryDeep },
+
+  changeResultBox: {
+    backgroundColor: '#F8FAFC',
+    padding: 12,
+    borderRadius: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+  },
+  changeLabel: { fontFamily: 'Inter_500Medium', fontSize: 13, color: COLORS.textSecondary },
+  changeValue: { fontFamily: 'Nunito_700Bold', fontSize: 18 },
+  textSuccess: { color: '#16A34A' },
+  textDanger: { color: '#DC2626' },
   confirmBtn: {
     backgroundColor: COLORS.primary,
     borderRadius: 18,

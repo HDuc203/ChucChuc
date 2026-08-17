@@ -22,6 +22,82 @@ import { formatVND } from '../utils/format';
 
 const NOTE_TAGS = ['Ít đường', 'Ít đá', 'Nhiều đá', 'Không đường', 'Đem ra sau'];
 
+// ── Category color themes & 2D Watercolor Artwork Fallbacks ───────────────────
+interface CategoryTheme {
+  bgColor: string;
+  accentColor: string;
+}
+
+const ART_FALLBACKS = {
+  coffee: require('../assets/images/art_coffee.jpg'),
+  matcha: require('../assets/images/art_matcha.jpg'),
+  juice: require('../assets/images/art_juice.jpg'),
+  soda: require('../assets/images/art_soda.jpg'),
+  softdrink: require('../assets/images/art_softdrink.jpg'),
+};
+
+const CATEGORY_THEMES: Record<string, CategoryTheme> = {
+  'cafe': { bgColor: '#FAF3EB', accentColor: '#8C5835' },
+  'cà phê': { bgColor: '#FAF3EB', accentColor: '#8C5835' },
+  'coffee': { bgColor: '#FAF3EB', accentColor: '#8C5835' },
+  'trà': { bgColor: '#F0F6F2', accentColor: '#3E7C5D' },
+  'tea': { bgColor: '#F0F6F2', accentColor: '#3E7C5D' },
+  'matcha': { bgColor: '#EAF4EC', accentColor: '#2D6B48' },
+  'cacao': { bgColor: '#F4ECE4', accentColor: '#7A4A28' },
+  'trái cây': { bgColor: '#FAF0E8', accentColor: '#C46234' },
+  'nước ép': { bgColor: '#FAF0E8', accentColor: '#C46234' },
+  'juice': { bgColor: '#FAF0E8', accentColor: '#C46234' },
+  'sinh tố': { bgColor: '#F2F8ED', accentColor: '#5C8C3E' },
+  'smoothie': { bgColor: '#F2F8ED', accentColor: '#5C8C3E' },
+  'sữa chua': { bgColor: '#FAF0F2', accentColor: '#B84E6E' },
+  'soda': { bgColor: '#FDF2F4', accentColor: '#C8526F' },
+  'nước ngọt': { bgColor: '#EEF4F7', accentColor: '#3B7394' },
+};
+
+const DEFAULT_THEME: CategoryTheme = { bgColor: '#F2F8F4', accentColor: '#3E7C5D' };
+
+function getCategoryTheme(categoryName: string): CategoryTheme {
+  const lower = categoryName.toLowerCase();
+  for (const key of Object.keys(CATEGORY_THEMES)) {
+    if (lower.includes(key)) return CATEGORY_THEMES[key];
+  }
+  return DEFAULT_THEME;
+}
+
+function getProductArt(productName: string, categoryName: string) {
+  const p = productName.toLowerCase();
+  const c = categoryName.toLowerCase();
+
+  // Matcha & Cacao
+  if (p.includes('matcha') || p.includes('cacao') || c.includes('matcha') || c.includes('cacao')) {
+    return ART_FALLBACKS.matcha;
+  }
+  // Fruit Juice & Smoothies
+  if (
+    p.includes('ép') ||
+    p.includes('cam') ||
+    p.includes('thơm') ||
+    p.includes('cà rốt') ||
+    p.includes('cà chua') ||
+    p.includes('bơ') ||
+    p.includes('sinh tố') ||
+    c.includes('nước ép') ||
+    c.includes('sinh tố')
+  ) {
+    return ART_FALLBACKS.juice;
+  }
+  // Soda & Yogurt
+  if (p.includes('soda') || p.includes('sữa chua') || c.includes('soda') || c.includes('sữa chua')) {
+    return ART_FALLBACKS.soda;
+  }
+  // Soft drinks
+  if (p.includes('nước ngọt') || c.includes('nước ngọt')) {
+    return ART_FALLBACKS.softdrink;
+  }
+  // Coffee & Tea
+  return ART_FALLBACKS.coffee;
+}
+
 export default function MenuScreen() {
   const router = useRouter();
   const { orderType, selectedTable, items, totalItems, totalAmount, addItem } = useCartStore();
@@ -111,12 +187,20 @@ export default function MenuScreen() {
       ? '🛍️ Mang về'
       : `🪑 ${selectedTable?.name ?? 'Tại bàn'}`;
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
-          <TouchableOpacity id="btn-back-menu" onPress={() => router.back()} style={styles.backTouch}>
+          <TouchableOpacity id="btn-back-menu" onPress={handleBack} style={styles.backTouch}>
             <Text style={styles.backText}>←</Text>
           </TouchableOpacity>
           <View style={styles.headerInfo}>
@@ -194,19 +278,25 @@ export default function MenuScreen() {
             const scale = getScale(item.id);
             const existingItem = items.find((i) => i.product.id === item.id);
 
+            // Find the category name for this product
+            const catName = categories.find((c) => c.id === item.category_id)?.name ?? '';
+            const theme = getCategoryTheme(catName);
+
             return (
               <TouchableOpacity
                 style={styles.productCard}
                 onPress={() => handleOpenAddModal(item)}
                 activeOpacity={0.9}
               >
-                {/* Image or Leaf Fallback */}
-                <View style={styles.productImageBox}>
-                  {item.image_url ? (
-                    <Image source={{ uri: item.image_url }} style={styles.productImage} />
-                  ) : (
-                    <Text style={styles.productImageEmoji}>🍃</Text>
-                  )}
+                {/* 2D Watercolor Artwork or custom photo */}
+                <View style={[styles.productImageBox, { backgroundColor: theme.bgColor }]}>
+                  <Image
+                    source={item.image_url ? { uri: item.image_url } : getProductArt(item.name, catName)}
+                    style={styles.productImage}
+                    resizeMode="cover"
+                  />
+                  {/* Subtle category accent stripe at bottom of image area */}
+                  <View style={[styles.productImageStripe, { backgroundColor: theme.accentColor }]} />
                 </View>
 
                 {/* Info */}
@@ -220,18 +310,18 @@ export default function MenuScreen() {
                     </Text>
                   ) : null}
                   <View style={styles.productBottom}>
-                    <Text style={styles.productPrice}>{formatVND(item.price)}</Text>
+                    <Text style={[styles.productPrice, { color: theme.accentColor }]}>{formatVND(item.price)}</Text>
                     <Animated.View style={{ transform: [{ scale }] }}>
                       <TouchableOpacity
                         id={`btn-add-${item.id}`}
-                        style={[styles.addBtn, count > 0 && styles.addBtnActive]}
+                        style={[styles.addBtn, { borderColor: theme.accentColor }, count > 0 && { backgroundColor: theme.accentColor, borderColor: theme.accentColor }]}
                         onPress={() => handleOpenAddModal(item)}
                         activeOpacity={0.8}
                       >
                         {count > 0 ? (
                           <Text style={styles.addBtnCount}>{count}</Text>
                         ) : (
-                          <Text style={styles.addBtnText}>+</Text>
+                          <Text style={[styles.addBtnText, { color: theme.accentColor }]}>+</Text>
                         )}
                       </TouchableOpacity>
                     </Animated.View>
@@ -343,17 +433,19 @@ export default function MenuScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   header: {
-    backgroundColor: COLORS.white,
+    backgroundColor: '#FAF7F0',
     paddingHorizontal: 16,
     paddingTop: 10,
     paddingBottom: 14,
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
-    shadowColor: COLORS.shadow,
+    borderBottomWidth: 1.5,
+    borderColor: 'rgba(197, 160, 89, 0.35)',
+    shadowColor: 'rgba(35, 70, 53, 0.08)',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 1,
-    shadowRadius: 12,
-    elevation: 6,
+    shadowRadius: 10,
+    elevation: 5,
     marginBottom: 10,
   },
   headerTop: {
@@ -363,42 +455,53 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   backTouch: {
-    paddingRight: 4,
-    paddingVertical: 2,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(197, 160, 89, 0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   backText: {
     fontFamily: 'Nunito_700Bold',
-    fontSize: 24,
-    color: COLORS.primary,
+    fontSize: 20,
+    color: '#234635',
   },
   headerInfo: { flex: 1 },
   shopName: {
     fontFamily: 'Nunito_700Bold',
     fontSize: 18,
-    color: COLORS.textPrimary,
+    color: '#234635',
+    letterSpacing: 0.5,
   },
   shopSub: {
     fontFamily: 'Inter_400Regular',
     fontSize: 12,
-    color: COLORS.textSecondary,
+    color: '#657E70',
   },
   orderBadge: {
-    backgroundColor: COLORS.primaryLight,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(197, 160, 89, 0.4)',
     alignSelf: 'center',
   },
   orderBadgeText: {
-    fontFamily: 'Inter_500Medium',
+    fontFamily: 'Nunito_700Bold',
     fontSize: 12,
-    color: COLORS.primary,
+    color: '#234635',
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.background,
+    backgroundColor: '#ECE7DC',
     borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(197, 160, 89, 0.3)',
     paddingHorizontal: 12,
     paddingVertical: 8,
     gap: 8,
@@ -408,7 +511,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontFamily: 'Inter_400Regular',
     fontSize: 14,
-    color: COLORS.textPrimary,
+    color: '#23382D',
   },
   categoryWrapper: {
     height: 48,
@@ -450,34 +553,44 @@ const styles = StyleSheet.create({
   productCard: {
     flex: 1,
     backgroundColor: COLORS.white,
-    borderRadius: 18,
+    borderRadius: 20,
     overflow: 'hidden',
-    shadowColor: COLORS.shadow,
+    borderWidth: 1.5,
+    borderColor: 'rgba(197, 160, 89, 0.28)',
+    shadowColor: 'rgba(35, 70, 53, 0.08)',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 1,
     shadowRadius: 8,
     elevation: 4,
   },
   productImageBox: {
-    height: 110,
-    backgroundColor: COLORS.primaryLight,
+    height: 125,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#FAF7F0',
+  },
+  productImageStripe: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    opacity: 0.6,
   },
   productImage: {
     width: '100%',
     height: '100%',
     resizeMode: 'cover',
   },
-  productImageEmoji: { fontSize: 36 },
   productInfo: {
     padding: 12,
   },
   productName: {
     fontFamily: 'Nunito_600SemiBold',
     fontSize: 14,
-    color: COLORS.textPrimary,
+    color: '#23382D',
     marginBottom: 4,
     minHeight: 34,
     lineHeight: 18,
@@ -485,7 +598,7 @@ const styles = StyleSheet.create({
   itemNoteBadge: {
     fontFamily: 'Inter_400Regular',
     fontSize: 11,
-    color: COLORS.primary,
+    color: '#3E7C5D',
     marginBottom: 4,
   },
   productBottom: {
@@ -496,26 +609,26 @@ const styles = StyleSheet.create({
   productPrice: {
     fontFamily: 'Nunito_700Bold',
     fontSize: 14,
-    color: COLORS.textPrice,
+    color: '#2E6B4F',
   },
   addBtn: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: COLORS.background,
+    backgroundColor: '#F8F5EE',
     borderWidth: 1.5,
-    borderColor: COLORS.primary,
+    borderColor: '#3E7C5D',
     alignItems: 'center',
     justifyContent: 'center',
   },
   addBtnActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+    backgroundColor: '#3E7C5D',
+    borderColor: '#3E7C5D',
   },
   addBtnText: {
     fontFamily: 'Nunito_700Bold',
     fontSize: 18,
-    color: COLORS.primary,
+    color: '#3E7C5D',
     includeFontPadding: false,
     textAlignVertical: 'center',
   },
@@ -531,16 +644,18 @@ const styles = StyleSheet.create({
     bottom: 20,
     left: 16,
     right: 16,
-    backgroundColor: COLORS.primary,
-    borderRadius: 20,
-    paddingVertical: 16,
+    backgroundColor: '#3E7C5D',
+    borderRadius: 22,
+    borderWidth: 1.5,
+    borderColor: 'rgba(215, 185, 135, 0.65)',
+    paddingVertical: 15,
     paddingHorizontal: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: COLORS.primary,
+    shadowColor: 'rgba(35, 70, 53, 0.35)',
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
+    shadowOpacity: 1,
+    shadowRadius: 14,
     elevation: 10,
   },
   cartBadge: {
